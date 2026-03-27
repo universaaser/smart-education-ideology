@@ -1,0 +1,278 @@
+package com.smartedu.service;
+
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.smartedu.common.PageResult;
+import com.smartedu.constant.KnowledgeRelationTypes;
+import com.smartedu.dto.KnowledgeNodeView;
+import com.smartedu.entity.IdeologyKnowledge;
+import com.smartedu.entity.KnowledgeRelation;
+import com.smartedu.entity.SubjectIdeologyMatch;
+import com.smartedu.entity.SubjectKnowledge;
+import com.smartedu.mapper.IdeologyKnowledgeMapper;
+import com.smartedu.mapper.KnowledgeRelationMapper;
+import com.smartedu.mapper.SubjectIdeologyMatchMapper;
+import com.smartedu.mapper.SubjectKnowledgeMapper;
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
+/**
+ * 知识图谱服务
+ *
+ * <p>
+ * 运行时主模型改为学科知识表和思政知识表的组合视图。
+ */
+@Service
+@RequiredArgsConstructor
+public class KnowledgeService {
+
+    private final SubjectKnowledgeMapper subjectKnowledgeMapper;
+    private final IdeologyKnowledgeMapper ideologyKnowledgeMapper;
+    private final SubjectIdeologyMatchMapper subjectIdeologyMatchMapper;
+    private final KnowledgeRelationMapper knowledgeRelationMapper;
+
+    public List<KnowledgeNodeView> getAllNodes() {
+        List<KnowledgeNodeView> nodes = new ArrayList<>();
+
+        LambdaQueryWrapper<SubjectKnowledge> subjectWrapper = new LambdaQueryWrapper<>();
+        subjectWrapper.orderByAsc(SubjectKnowledge::getId);
+        for (SubjectKnowledge subject : subjectKnowledgeMapper.selectList(subjectWrapper)) {
+            nodes.add(KnowledgeViewMapper.toSubjectNode(subject));
+        }
+
+        LambdaQueryWrapper<IdeologyKnowledge> ideologyWrapper = new LambdaQueryWrapper<>();
+        ideologyWrapper.orderByAsc(IdeologyKnowledge::getSortOrder).orderByAsc(IdeologyKnowledge::getId);
+        for (IdeologyKnowledge ideology : ideologyKnowledgeMapper.selectList(ideologyWrapper)) {
+            nodes.add(KnowledgeViewMapper.toIdeologyNode(ideology));
+        }
+        return nodes;
+    }
+
+    public List<KnowledgeRelation> getAllConnections() {
+        List<KnowledgeRelation> relations = new ArrayList<>();
+
+        LambdaQueryWrapper<KnowledgeRelation> relationWrapper = new LambdaQueryWrapper<>();
+        relationWrapper.orderByAsc(KnowledgeRelation::getId);
+        for (KnowledgeRelation relation : knowledgeRelationMapper.selectList(relationWrapper)) {
+            relation.setRelationType(KnowledgeRelationTypes.normalize(relation.getRelationType()));
+            if (relation.getLineStyle() == null || relation.getLineStyle().isBlank()) {
+                relation.setLineStyle(KnowledgeRelationTypes.defaultLineStyle(relation.getRelationType()));
+            }
+            relations.add(relation);
+        }
+
+        LambdaQueryWrapper<SubjectIdeologyMatch> matchWrapper = new LambdaQueryWrapper<>();
+        matchWrapper.orderByDesc(SubjectIdeologyMatch::getIsPrimary)
+                .orderByDesc(SubjectIdeologyMatch::getMatchScore);
+        for (SubjectIdeologyMatch match : subjectIdeologyMatchMapper.selectList(matchWrapper)) {
+            KnowledgeRelation relation = new KnowledgeRelation();
+            // Synthetic negative relation ids keep the graph payload compatible while making it
+            // clear these links come from subject_ideology_matches instead of knowledge_relations.
+            relation.setId(-match.getId());
+            relation.setFromNodeId(KnowledgeViewMapper.toSubjectGraphId(match.getSubjectKnowledgeId()));
+            relation.setToNodeId(KnowledgeViewMapper.toIdeologyGraphId(match.getIdeologyKnowledgeId()));
+            relation.setRelationType(KnowledgeRelationTypes.VALUE_SHOW);
+            relation.setLineStyle("DASHED");
+            relation.setWeight(match.getMatchScore() == null ? 1D : match.getMatchScore().doubleValue());
+            relation.setDescription(match.getMatchReason());
+            relations.add(relation);
+        }
+        return relations;
+    }
+
+    public Map<String, Object> getGraphData() {
+        Map<String, Object> result = new HashMap<>();
+        result.put("nodes", getAllNodes());
+        result.put("relations", getAllConnections());
+        return result;
+    }
+
+    public KnowledgeNodeView getNodeById(Long id) {
+        if (KnowledgeViewMapper.isIdeologyGraphId(id)) {
+            IdeologyKnowledge ideology = ideologyKnowledgeMapper.selectById(KnowledgeViewMapper.toEntityId(id));
+            return ideology == null ? null : KnowledgeViewMapper.toIdeologyNode(ideology);
+        }
+
+        SubjectKnowledge subject = subjectKnowledgeMapper.selectById(id);
+        return subject == null ? null : KnowledgeViewMapper.toSubjectNode(subject);
+    }
+
+    /**
+     * 当前新增节点只支持学科知识，为后续新增学科知识功能预留。
+     */
+    @Transactional
+    public KnowledgeNodeView createNode(KnowledgeNodeView node) {
+        SubjectKnowledge subject = new SubjectKnowledge();
+        subject.setName(node.getName());
+        subject.setSubject(node.getSubject() == null || node.getSubject().isBlank() ? "通用学科" : node.getSubject());
+        subject.setCategory(node.getCategory());
+        subject.setSummary(node.getTechnicalDefinition());
+        subject.setIdeologySummary(node.getIdeologicalValue());
+        subject.setPositionX(node.getPositionX() == null ? 0D : node.getPositionX());
+        subject.setPositionY(node.getPositionY() == null ? 0D : node.getPositionY());
+        subject.setNodeSize(node.getNodeSize() == null || node.getNodeSize().isBlank() ? "MD" : node.getNodeSize());
+        subject.setIcon(node.getIcon());
+        subject.setTag(node.getCategory());
+        subject.setSubTitle(node.getSubTitle());
+        subject.setCreatedAt(LocalDateTime.now());
+        subject.setUpdatedAt(LocalDateTime.now());
+        subjectKnowledgeMapper.insert(subject);
+        return KnowledgeViewMapper.toSubjectNode(subject);
+    }
+
+    @Transactional
+    public KnowledgeNodeView updateNode(KnowledgeNodeView node) {
+        if (KnowledgeViewMapper.isIdeologyGraphId(node.getId())) {
+            // Ideology nodes are fixed dictionary data in this stage, so the editor should
+            // treat them as read-only and simply return the existing view object.
+            return getNodeById(node.getId());
+        }
+
+        SubjectKnowledge subject = subjectKnowledgeMapper.selectById(node.getId());
+        if (subject == null) {
+            return null;
+        }
+
+        subject.setName(node.getName());
+        subject.setSubject(node.getSubject());
+        subject.setCategory(node.getCategory());
+        subject.setSummary(node.getTechnicalDefinition());
+        subject.setIdeologySummary(node.getIdeologicalValue());
+        subject.setPositionX(node.getPositionX());
+        subject.setPositionY(node.getPositionY());
+        subject.setNodeSize(node.getNodeSize());
+        subject.setIcon(node.getIcon());
+        subject.setSubTitle(node.getSubTitle());
+        subject.setUpdatedAt(LocalDateTime.now());
+        subjectKnowledgeMapper.updateById(subject);
+        return KnowledgeViewMapper.toSubjectNode(subject);
+    }
+
+    @Transactional
+    public void deleteNode(Long id) {
+        if (KnowledgeViewMapper.isIdeologyGraphId(id)) {
+            return;
+        }
+
+        LambdaQueryWrapper<KnowledgeRelation> relationWrapper = new LambdaQueryWrapper<>();
+        relationWrapper.eq(KnowledgeRelation::getFromNodeId, id)
+                .or()
+                .eq(KnowledgeRelation::getToNodeId, id);
+        knowledgeRelationMapper.delete(relationWrapper);
+
+        LambdaQueryWrapper<SubjectIdeologyMatch> matchWrapper = new LambdaQueryWrapper<>();
+        matchWrapper.eq(SubjectIdeologyMatch::getSubjectKnowledgeId, id);
+        subjectIdeologyMatchMapper.delete(matchWrapper);
+
+        subjectKnowledgeMapper.deleteById(id);
+    }
+
+    @Transactional
+    public KnowledgeRelation createRelation(KnowledgeRelation relation) {
+        if (KnowledgeViewMapper.isIdeologyGraphId(relation.getFromNodeId())
+                || KnowledgeViewMapper.isIdeologyGraphId(relation.getToNodeId())) {
+            throw new IllegalArgumentException("当前仅支持学科知识之间创建关系");
+        }
+
+        relation.setRelationType(KnowledgeRelationTypes.normalize(relation.getRelationType()));
+        if (relation.getLineStyle() == null || relation.getLineStyle().isBlank()) {
+            relation.setLineStyle(KnowledgeRelationTypes.defaultLineStyle(relation.getRelationType()));
+        }
+        relation.setCreatedAt(LocalDateTime.now());
+        relation.setUpdatedAt(LocalDateTime.now());
+        knowledgeRelationMapper.insert(relation);
+        return relation;
+    }
+
+    @Transactional
+    public void deleteRelation(Long id) {
+        if (id != null && id < 0) {
+            return;
+        }
+        knowledgeRelationMapper.deleteById(id);
+    }
+
+    public List<KnowledgeNodeView> searchNodes(String keyword) {
+        List<KnowledgeNodeView> results = new ArrayList<>();
+        results.addAll(searchSubjectNodes(keyword));
+        results.addAll(searchIdeologyNodes(keyword));
+        return results;
+    }
+
+    public PageResult<KnowledgeNodeView> getNodesPage(int page, int size, String category) {
+        List<KnowledgeNodeView> allNodes = getAllNodes();
+        List<KnowledgeNodeView> filtered = new ArrayList<>();
+        for (KnowledgeNodeView node : allNodes) {
+            if (category == null || category.isBlank() || category.equals(node.getCategory())) {
+                filtered.add(node);
+            }
+        }
+
+        int safePage = Math.max(1, page);
+        int safeSize = Math.max(1, size);
+        int fromIndex = Math.min((safePage - 1) * safeSize, filtered.size());
+        int toIndex = Math.min(fromIndex + safeSize, filtered.size());
+        List<KnowledgeNodeView> pageRecords = filtered.subList(fromIndex, toIndex);
+        return new PageResult<>(pageRecords, (long) filtered.size(), (long) safeSize, (long) safePage);
+    }
+
+    @Transactional
+    public void updateNodePosition(Long id, Double x, Double y) {
+        if (KnowledgeViewMapper.isIdeologyGraphId(id)) {
+            IdeologyKnowledge ideology = ideologyKnowledgeMapper.selectById(KnowledgeViewMapper.toEntityId(id));
+            if (ideology != null) {
+                ideology.setPositionX(x);
+                ideology.setPositionY(y);
+                ideology.setUpdatedAt(LocalDateTime.now());
+                ideologyKnowledgeMapper.updateById(ideology);
+            }
+            return;
+        }
+
+        SubjectKnowledge subject = subjectKnowledgeMapper.selectById(id);
+        if (subject != null) {
+            subject.setPositionX(x);
+            subject.setPositionY(y);
+            subject.setUpdatedAt(LocalDateTime.now());
+            subjectKnowledgeMapper.updateById(subject);
+        }
+    }
+
+    private List<KnowledgeNodeView> searchSubjectNodes(String keyword) {
+        LambdaQueryWrapper<SubjectKnowledge> wrapper = new LambdaQueryWrapper<>();
+        wrapper.like(SubjectKnowledge::getName, keyword)
+                .or()
+                .like(SubjectKnowledge::getSubTitle, keyword)
+                .or()
+                .like(SubjectKnowledge::getTag, keyword)
+                .or()
+                .like(SubjectKnowledge::getSummary, keyword);
+
+        List<KnowledgeNodeView> nodes = new ArrayList<>();
+        for (SubjectKnowledge subject : subjectKnowledgeMapper.selectList(wrapper)) {
+            nodes.add(KnowledgeViewMapper.toSubjectNode(subject));
+        }
+        return nodes;
+    }
+
+    private List<KnowledgeNodeView> searchIdeologyNodes(String keyword) {
+        LambdaQueryWrapper<IdeologyKnowledge> wrapper = new LambdaQueryWrapper<>();
+        wrapper.like(IdeologyKnowledge::getName, keyword)
+                .or()
+                .like(IdeologyKnowledge::getDescription, keyword)
+                .or()
+                .like(IdeologyKnowledge::getKeywords, keyword);
+
+        List<KnowledgeNodeView> nodes = new ArrayList<>();
+        for (IdeologyKnowledge ideology : ideologyKnowledgeMapper.selectList(wrapper)) {
+            nodes.add(KnowledgeViewMapper.toIdeologyNode(ideology));
+        }
+        return nodes;
+    }
+}
