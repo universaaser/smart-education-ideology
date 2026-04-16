@@ -156,13 +156,72 @@ export const userApi = {
 };
 
 export const uploadApi = {
-  uploadFile: (file: File, userId = 1) => {
+  uploadFile: (file: File, userId = 1, courseId?: number) => {
     const formData = new FormData();
     formData.append('file', file);
     formData.append('userId', String(userId));
+    if (courseId !== undefined && courseId !== null) {
+      formData.append('courseId', String(courseId));
+    }
     return post<{ taskId: number; fileName: string; status: string }>('/upload/file', formData);
   },
   getTaskStatus: (taskId: number) => get<UploadTaskInfo>(`/upload/tasks/${taskId}`),
+  getTaskResultDetail: (taskId: number) => get<PipelineResultInfo>(`/upload/tasks/${taskId}/result-detail`),
+  regenerateTask: (taskId: number) => post<PipelineResultInfo>(`/upload/tasks/${taskId}/regenerate`),
+  getEditorDraft: (taskId: number) => get<TeachingMaterialDraftInfo>(`/upload/tasks/${taskId}/editor-draft`),
+  saveEditorDraft: (taskId: number, data: TeachingMaterialSaveRequest) =>
+    put<TeachingMaterialDraftInfo>(`/upload/tasks/${taskId}/editor-draft`, data),
+  savePublishedMaterial: (taskId: number, data: TeachingMaterialSaveRequest) =>
+    post<TeachingMaterialViewInfo>(`/upload/tasks/${taskId}/materials`, data),
+  getTaskMaterialVersions: (taskId: number) =>
+    get<MaterialVersionItemInfo[]>(`/upload/tasks/${taskId}/materials`),
+  getTaskTraces: (
+    taskId: number,
+    params: { courseId?: number; knowledgePoint?: string; ideologyElement?: string; page?: number; size?: number } = {},
+  ) => {
+    const search = new URLSearchParams();
+    if (params.courseId !== undefined) search.set('courseId', String(params.courseId));
+    if (params.knowledgePoint) search.set('knowledgePoint', params.knowledgePoint);
+    if (params.ideologyElement) search.set('ideologyElement', params.ideologyElement);
+    if (params.page !== undefined) search.set('page', String(params.page));
+    if (params.size !== undefined) search.set('size', String(params.size));
+    const query = search.toString();
+    return get<PageResultInfo<TeachingMaterialTraceInfo>>(
+      `/upload/tasks/${taskId}/traces${query ? `?${query}` : ''}`
+    );
+  },
+  rollbackMaterialVersion: (taskId: number, materialId: number) =>
+    post<TeachingMaterialDraftInfo>(`/upload/tasks/${taskId}/rollback/${materialId}`),
+};
+
+export const materialApi = {
+  getById: (materialId: number) => get<TeachingMaterialViewInfo>(`/materials/${materialId}`),
+  getTraces: (
+    materialId: number,
+    params: { knowledgePoint?: string; ideologyElement?: string; page?: number; size?: number } = {},
+  ) => {
+    const search = new URLSearchParams();
+    if (params.knowledgePoint) search.set('knowledgePoint', params.knowledgePoint);
+    if (params.ideologyElement) search.set('ideologyElement', params.ideologyElement);
+    if (params.page !== undefined) search.set('page', String(params.page));
+    if (params.size !== undefined) search.set('size', String(params.size));
+    const query = search.toString();
+    return get<PageResultInfo<TeachingMaterialTraceInfo>>(
+      `/materials/${materialId}/traces${query ? `?${query}` : ''}`
+    );
+  },
+  exportMarkdown: async (materialId: number): Promise<Blob> => {
+    const token = getToken();
+    const headers: Record<string, string> = {};
+    if (token) {
+      headers.Authorization = `Bearer ${token}`;
+    }
+    const response = await fetch(`/api/materials/${materialId}/export/markdown`, { headers });
+    if (!response.ok) {
+      throw new Error('Failed to export markdown');
+    }
+    return response.blob();
+  },
 };
 
 /**
@@ -384,6 +443,131 @@ export interface UploadTaskInfo {
   aiAnalysis?: string;
   completedAt?: string;
   errorMessage?: string;
+  courseId?: number;
+}
+
+export interface DocumentStructureInfo {
+  title: string;
+  documentType: 'TEXTBOOK' | 'OUTLINE' | 'PAPER' | 'UNKNOWN' | string;
+  overview: string;
+  chapterOutline: string[];
+  teachingFocus: string[];
+}
+
+export interface PipelineKnowledgePointInfo {
+  pointName: string;
+  definition: string;
+  chapter: string;
+  importance: 'HIGH' | 'MEDIUM' | 'LOW' | string;
+  evidenceSnippet: string;
+}
+
+export interface IdeologyMatchInfo {
+  knowledgePointName: string;
+  ideologyElement: string;
+  matchReason: string;
+  confidence: number;
+}
+
+export interface TeachingQuestionInfo {
+  stem: string;
+  referenceAnswer: string;
+  scoringPoints: string[];
+}
+
+export interface TeachingArtifactsInfo {
+  lectureNotes: string;
+  cases: string[];
+  questions: TeachingQuestionInfo[];
+}
+
+export interface PipelineResultInfo {
+  documentStructure?: DocumentStructureInfo;
+  knowledgePoints: PipelineKnowledgePointInfo[];
+  ideologyMatches: IdeologyMatchInfo[];
+  teachingArtifacts?: TeachingArtifactsInfo;
+  warnings: string[];
+  inferred: boolean;
+  schemaVersion: string;
+}
+
+export interface TeachingTraceItemInfo {
+  parseTaskId: number;
+  knowledgePointName: string;
+  knowledgePointId?: number | null;
+  ideologyElement: string;
+  evidenceSnippet: string;
+  matchReason: string;
+}
+
+export interface TeachingMaterialSaveRequest {
+  title: string;
+  lectureNotes: string;
+  cases: string[];
+  questions: TeachingQuestionInfo[];
+}
+
+export interface TeachingMaterialDraftInfo {
+  materialId?: number | null;
+  parseTaskId: number;
+  userId: number;
+  courseId?: number | null;
+  title: string;
+  lectureNotes: string;
+  cases: string[];
+  questions: TeachingQuestionInfo[];
+  traceItems: TeachingTraceItemInfo[];
+  schemaVersion: string;
+  versionNo: number;
+  status: string;
+  updatedAt?: string;
+}
+
+export interface TeachingMaterialViewInfo {
+  materialId: number;
+  parseTaskId: number;
+  userId: number;
+  courseId?: number | null;
+  title: string;
+  lectureNotes: string;
+  cases: string[];
+  questions: TeachingQuestionInfo[];
+  traceItems: TeachingTraceItemInfo[];
+  schemaVersion: string;
+  versionNo: number;
+  status: string;
+  isLatest: number;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface MaterialVersionItemInfo {
+  materialId: number;
+  versionNo: number;
+  status: string;
+  isLatest: number;
+  updatedAt?: string;
+}
+
+export interface TeachingMaterialTraceInfo {
+  id: number;
+  materialId: number;
+  parseTaskId: number;
+  courseId?: number | null;
+  knowledgePointId?: number | null;
+  knowledgePointName: string;
+  ideologyElement: string;
+  evidenceSnippet: string;
+  matchReason: string;
+  createdAt?: string;
+}
+
+export interface PageResultInfo<T> {
+  records: T[];
+  total: number;
+  size: number;
+  current: number;
+  pages: number;
 }
 
 /** 学习路径推荐结果 */

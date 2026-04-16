@@ -1,9 +1,17 @@
 package com.smartedu.controller;
 
 import com.smartedu.common.Result;
+import com.smartedu.common.PageResult;
+import com.smartedu.dto.PipelineResultDto;
+import com.smartedu.dto.MaterialVersionItemDto;
+import com.smartedu.dto.TeachingMaterialDraftDto;
+import com.smartedu.dto.TeachingMaterialSaveRequestDto;
+import com.smartedu.dto.TeachingMaterialTraceDto;
+import com.smartedu.dto.TeachingMaterialViewDto;
 import com.smartedu.entity.ParseTask;
 import com.smartedu.mapper.ParseTaskMapper;
 import com.smartedu.service.AiIntelligenceService;
+import com.smartedu.service.TeachingMaterialService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -17,6 +25,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.LocalDateTime;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -36,6 +45,7 @@ public class UploadController {
 
     private final ParseTaskMapper parseTaskMapper;
     private final AiIntelligenceService aiIntelligenceService;
+    private final TeachingMaterialService teachingMaterialService;
 
     @Value("${storage.upload-path}")
     private String uploadPath;
@@ -53,7 +63,8 @@ public class UploadController {
     @PostMapping("/file")
     public Result<Map<String, Object>> uploadFile(
             @RequestParam("file") MultipartFile file,
-            @RequestParam(defaultValue = "1") Long userId) {
+            @RequestParam(defaultValue = "1") Long userId,
+            @RequestParam(required = false) Long courseId) {
 
         // 1. 校验文件
         if (file.isEmpty()) {
@@ -89,6 +100,7 @@ public class UploadController {
             // 5. 创建解析任务
             ParseTask task = new ParseTask();
             task.setUserId(userId);
+            task.setCourseId(courseId);
             task.setFileName(originalFilename);
             task.setFilePath(filePath.toString());
             task.setFileSize(file.getSize());
@@ -139,6 +151,7 @@ public class UploadController {
         Map<String, Object> result = new HashMap<>();
         result.put("taskId", task.getId());
         result.put("fileName", task.getFileName());
+        result.put("courseId", task.getCourseId());
         result.put("status", task.getStatus());
         result.put("progress", task.getProgress());
         result.put("currentStep", task.getCurrentStep());
@@ -156,6 +169,123 @@ public class UploadController {
         }
 
         return Result.success(result);
+    }
+
+    /**
+     * 获取结构化流水线结果明细。
+     */
+    @GetMapping("/tasks/{taskId}/result-detail")
+    public Result<PipelineResultDto> getTaskResultDetail(@PathVariable Long taskId) {
+        ParseTask task = parseTaskMapper.selectById(taskId);
+        if (task == null) {
+            return Result.notFound("Task not found");
+        }
+        PipelineResultDto pipelineResult = aiIntelligenceService.getPipelineResult(taskId);
+        return Result.success(pipelineResult);
+    }
+
+    /**
+     * 基于已有解析结果重新生成教学内容，不重复上传文件。
+     */
+    @PostMapping("/tasks/{taskId}/regenerate")
+    public Result<PipelineResultDto> regenerateTask(@PathVariable Long taskId) {
+        ParseTask task = parseTaskMapper.selectById(taskId);
+        if (task == null) {
+            return Result.notFound("Task not found");
+        }
+        PipelineResultDto regenerated = aiIntelligenceService.regenerateTask(taskId);
+        return Result.success("Pipeline regenerated", regenerated);
+    }
+
+    /**
+     * 获取教师编辑草稿。
+     */
+    @GetMapping("/tasks/{taskId}/editor-draft")
+    public Result<TeachingMaterialDraftDto> getEditorDraft(@PathVariable Long taskId) {
+        ParseTask task = parseTaskMapper.selectById(taskId);
+        if (task == null) {
+            return Result.notFound("Task not found");
+        }
+        TeachingMaterialDraftDto draft = teachingMaterialService.getEditorDraft(taskId);
+        return Result.success(draft);
+    }
+
+    /**
+     * 保存教师编辑草稿，不升版本。
+     */
+    @PutMapping("/tasks/{taskId}/editor-draft")
+    public Result<TeachingMaterialDraftDto> saveEditorDraft(
+            @PathVariable Long taskId,
+            @RequestBody TeachingMaterialSaveRequestDto request) {
+        ParseTask task = parseTaskMapper.selectById(taskId);
+        if (task == null) {
+            return Result.notFound("Task not found");
+        }
+        TeachingMaterialDraftDto draft = teachingMaterialService.saveDraft(taskId, request);
+        return Result.success("Draft saved", draft);
+    }
+
+    /**
+     * 提交保存正式版本，自动升版本号。
+     */
+    @PostMapping("/tasks/{taskId}/materials")
+    public Result<TeachingMaterialViewDto> savePublishedMaterial(
+            @PathVariable Long taskId,
+            @RequestBody TeachingMaterialSaveRequestDto request) {
+        ParseTask task = parseTaskMapper.selectById(taskId);
+        if (task == null) {
+            return Result.notFound("Task not found");
+        }
+        TeachingMaterialViewDto saved = teachingMaterialService.savePublishedVersion(taskId, request);
+        return Result.success("Material version saved", saved);
+    }
+
+    /**
+     * Query material versions for one parse task.
+     */
+    @GetMapping("/tasks/{taskId}/materials")
+    public Result<List<MaterialVersionItemDto>> getTaskMaterialVersions(@PathVariable Long taskId) {
+        ParseTask task = parseTaskMapper.selectById(taskId);
+        if (task == null) {
+            return Result.notFound("Task not found");
+        }
+        List<MaterialVersionItemDto> versions = teachingMaterialService.getTaskMaterialVersions(taskId);
+        return Result.success(versions);
+    }
+
+    /**
+     * Query searchable traces under one parse task.
+     */
+    @GetMapping("/tasks/{taskId}/traces")
+    public Result<PageResult<TeachingMaterialTraceDto>> getTaskTraces(
+            @PathVariable Long taskId,
+            @RequestParam(required = false) Long courseId,
+            @RequestParam(required = false) String knowledgePoint,
+            @RequestParam(required = false) String ideologyElement,
+            @RequestParam(defaultValue = "1") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        ParseTask task = parseTaskMapper.selectById(taskId);
+        if (task == null) {
+            return Result.notFound("Task not found");
+        }
+        PageResult<TeachingMaterialTraceDto> traces = teachingMaterialService.getTaskTracePage(
+                taskId, courseId, knowledgePoint, ideologyElement, page, size);
+        return Result.success(traces);
+    }
+
+    /**
+     * Rollback one historical version into current draft.
+     */
+    @PostMapping("/tasks/{taskId}/rollback/{materialId}")
+    public Result<TeachingMaterialDraftDto> rollbackMaterialVersion(
+            @PathVariable Long taskId,
+            @PathVariable Long materialId) {
+        ParseTask task = parseTaskMapper.selectById(taskId);
+        if (task == null) {
+            return Result.notFound("Task not found");
+        }
+        TeachingMaterialDraftDto draft = teachingMaterialService.rollbackToVersion(taskId, materialId);
+        return Result.success("Rollback completed", draft);
     }
 
     /**

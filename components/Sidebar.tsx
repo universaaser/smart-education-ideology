@@ -1,145 +1,227 @@
-import React, { useRef, useState } from 'react';
+import React, { useState } from 'react';
+import {
+  Menu, Avatar, Button, Tooltip, Typography, Upload,
+  type MenuProps,
+} from 'antd';
+import {
+  DashboardOutlined, HomeOutlined, ShareAltOutlined, RobotOutlined,
+  CloudUploadOutlined, BookOutlined, LogoutOutlined,
+  UserOutlined,
+} from '@ant-design/icons';
 import { View, NavItem, CurrentUser } from '../types';
 import { userApi } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 
+const { Text } = Typography;
+
 interface SidebarProps {
   currentView: View;
-  onChangeView: (view: View) => void;
+  onChangeView: (view: View, options?: { highlightNodeIds?: number[] }) => void;
   onLogout: () => void;
   user?: CurrentUser | null;
-  /** 头像更新后回调，用于在父组件同步更新用户信息 */
   onAvatarChange?: (avatarUrl: string) => void;
+  /** 是否折叠状态，用于控制用户信息区的显示 */
+  collapsed?: boolean;
 }
 
-const ALL_NAV_ITEMS: NavItem[] = [
-  { id: View.DASHBOARD, label: '仪表盘', icon: 'dashboard' },
-  { id: View.STUDENT_HOME, label: '学习首页', icon: 'home' },
-  { id: View.KNOWLEDGE_GRAPH, label: '知识图谱', icon: 'hub' },
-  { id: View.AI_ASSISTANT, label: 'AI助教', icon: 'smart_toy', isBeta: true },
-  { id: View.RESOURCE_UPLOAD, label: '资源上传', icon: 'cloud_upload' },
-  { id: View.COURSE_LIBRARY, label: '课程库', icon: 'library_books' },
+/** 导航配置：菜单项 key 与 View 枚举保持一致 */
+const ALL_NAV_ITEMS: (NavItem & { antIcon: React.ReactNode })[] = [
+  { id: View.DASHBOARD,       label: '仪表盘',   icon: 'dashboard',    antIcon: <DashboardOutlined /> },
+  { id: View.STUDENT_HOME,    label: '学习首页', icon: 'home',         antIcon: <HomeOutlined /> },
+  { id: View.KNOWLEDGE_GRAPH, label: '知识图谱', icon: 'hub',          antIcon: <ShareAltOutlined /> },
+  { id: View.AI_ASSISTANT,    label: 'AI 助教',  icon: 'smart_toy',    antIcon: <RobotOutlined />, isBeta: true },
+  { id: View.RESOURCE_UPLOAD, label: '资源上传', icon: 'cloud_upload', antIcon: <CloudUploadOutlined /> },
+  { id: View.COURSE_LIBRARY,  label: '课程库',   icon: 'library_books',antIcon: <BookOutlined /> },
 ];
 
-export const Sidebar: React.FC<SidebarProps> = ({ currentView, onChangeView, onLogout, user, onAvatarChange }) => {
+/**
+ * 应用侧边栏
+ *
+ * NOTE: 使用 Ant Design Menu（dark 主题）替换手写 button 列表。
+ * 头像上传保留原有 input ref 方案，Upload 组件 beforeUpload 返回 false 阻止自动上传，
+ * 改为手动调用 userApi.uploadAvatar。
+ */
+export const AppSidebar: React.FC<SidebarProps> = ({
+  currentView,
+  onChangeView,
+  onLogout,
+  user,
+  onAvatarChange,
+  collapsed = false,
+}) => {
   const { roleUi } = useAuth();
+  const [uploading, setUploading] = useState(false);
+  const [avatarUrl, setAvatarUrl] = useState(user?.avatar || '');
+
   const displayName = user?.realName || user?.username || '用户';
   const roleText = user?.department
     ? `${user.department} · ${roleUi?.roleLabel || user.role || '教师'}`
     : roleUi?.roleLabel || user?.role || '教师';
 
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const [uploading, setUploading] = useState(false);
-  const [avatarUrl, setAvatarUrl] = useState(user?.avatar || '');
-
-  // 基于角色白名单过滤左侧菜单
-  const navItems = ALL_NAV_ITEMS.filter(item => 
+  /** 基于角色白名单过滤菜单项 */
+  const navItems = ALL_NAV_ITEMS.filter(item =>
     roleUi?.allowedViews?.includes(item.id)
   );
 
-  /** 点击头像触发文件选择 */
-  const handleAvatarClick = () => {
-    fileInputRef.current?.click();
-  };
+  /** 构造 Ant Design Menu items 格式 */
+  const menuItems: MenuProps['items'] = navItems.map(item => ({
+    key: item.id,
+    icon: item.antIcon,
+    label: item.isBeta ? (
+      <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        {item.label}
+        <span style={{
+          fontSize: 9, background: 'var(--color-error)', color: '#fff',
+          padding: '1px 5px', borderRadius: 4, lineHeight: '14px', fontWeight: 700,
+        }}>
+          BETA
+        </span>
+      </span>
+    ) : item.label,
+  }));
 
-  /** 上传头像 */
-  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
+  /** 头像上传处理：手动调用 API，不走 antd Upload 自动上传 */
+  const handleAvatarUpload = async (file: File) => {
     setUploading(true);
     try {
       const result = await userApi.uploadAvatar(file);
       setAvatarUrl(result.avatarUrl);
       onAvatarChange?.(result.avatarUrl);
     } catch {
-      // NOTE: 上传失败静默处理
+      // NOTE: 上传失败静默处理，不阻断用户流程
     } finally {
       setUploading(false);
-      // 清空 input 值，允许再次选择同一文件
-      if (fileInputRef.current) {
-        fileInputRef.current.value = '';
-      }
     }
+    // 返回 false 阻止 antd Upload 自动上传
+    return false;
   };
 
   return (
-    <aside className="w-64 bg-sidebar-bg text-white flex flex-col shrink-0 h-full">
-      <div className="p-6 flex items-center gap-3">
-        <div className="size-9 bg-primary rounded-lg flex items-center justify-center text-white shrink-0 shadow-lg shadow-primary/20">
-          <span className="material-symbols-outlined text-2xl">auto_awesome</span>
+    <div style={{
+      height: '100%',
+      display: 'flex',
+      flexDirection: 'column',
+      background: 'var(--sidebar-bg)',
+    }}>
+      {/* ───── Logo 区 ───── */}
+      <div style={{
+        padding: collapsed ? '20px 0' : '20px 20px',
+        display: 'flex',
+        alignItems: 'center',
+        gap: 10,
+        borderBottom: '1px solid rgba(255,255,255,0.06)',
+        justifyContent: collapsed ? 'center' : 'flex-start',
+        minHeight: 64,
+      }}>
+        <div style={{
+          width: 36, height: 36,
+          background: 'var(--color-primary)',
+          borderRadius: 'var(--radius-sm)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          boxShadow: '0 4px 12px rgba(22,119,255,0.35)',
+          flexShrink: 0,
+        }}>
+          <span className="material-symbols-outlined" style={{ color: '#fff', fontSize: 20 }}>auto_awesome</span>
         </div>
-        <div className="overflow-hidden">
-          <h1 className="text-white text-lg font-bold leading-tight font-display">智教思政</h1>
-          <p className="text-slate-400 text-[11px] truncate">智慧教学辅助系统</p>
-        </div>
-      </div>
-
-      <nav className="flex-1 px-4 py-4 flex flex-col gap-1">
-        {navItems.map((item) => (
-          <button
-            key={item.id}
-            onClick={() => onChangeView(item.id)}
-            className={`flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all w-full text-left group ${currentView === item.id
-              ? 'bg-primary text-white shadow-lg shadow-primary/20'
-              : 'text-slate-400 hover:bg-white/5 hover:text-white'
-              }`}
-          >
-            <span className={`material-symbols-outlined text-xl ${currentView === item.id ? '' : 'group-hover:scale-110 transition-transform'}`}>
-              {item.icon}
-            </span>
-            <span className="text-sm font-medium flex-1">{item.label}</span>
-            {item.isBeta && (
-              <span className="text-[10px] bg-red-500 text-white px-1.5 py-0.5 rounded font-bold leading-none">
-                BETA
-              </span>
-            )}
-          </button>
-        ))}
-      </nav>
-
-      <div className="mt-auto p-4 border-t border-slate-800">
-        <div className="flex items-center gap-3 px-2 py-2">
-          {/* 可点击上传头像 */}
-          <button
-            onClick={handleAvatarClick}
-            className="size-10 rounded-full border border-slate-700 bg-primary/10 flex items-center justify-center shrink-0 overflow-hidden hover:ring-2 hover:ring-primary/40 transition-all cursor-pointer group relative"
-            title="点击更换头像"
-          >
-            {avatarUrl ? (
-              <img src={avatarUrl} alt="头像" className="size-full object-cover" />
-            ) : (
-              <span className="material-symbols-outlined text-primary text-xl">person</span>
-            )}
-            {/* 悬浮遮罩 */}
-            <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-              {uploading ? (
-                <div className="size-4 border-2 border-white/40 border-t-white rounded-full animate-spin"></div>
-              ) : (
-                <span className="material-symbols-outlined text-white text-sm">photo_camera</span>
-              )}
+        {!collapsed && (
+          <div style={{ overflow: 'hidden' }}>
+            <div style={{ color: '#fff', fontWeight: 700, fontSize: 16, lineHeight: 1.2, fontFamily: "'Lexend', sans-serif" }}>
+              智教思政
             </div>
-          </button>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/*"
-            onChange={handleFileChange}
-            className="hidden"
-          />
-          <div className="overflow-hidden">
-            <p className="text-white text-sm font-semibold truncate">{displayName}</p>
-            <p className="text-slate-500 text-[11px] truncate">{roleText}</p>
+            <div style={{ color: 'var(--color-text-secondary)', fontSize: 11, marginTop: 2 }}>智慧教学辅助系统</div>
           </div>
-        </div>
-        <button
-          onClick={onLogout}
-          className="w-full mt-4 flex items-center justify-center gap-2 bg-slate-800/50 hover:bg-slate-800 text-slate-400 hover:text-white py-2 rounded-lg text-xs font-medium transition-all"
-        >
-          <span className="material-symbols-outlined text-sm">logout</span>
-          退出登录
-        </button>
+        )}
       </div>
-    </aside>
+
+      {/* ───── 导航菜单 ───── */}
+      <div style={{ flex: 1, overflow: 'hidden auto', paddingTop: 8 }}>
+        <Menu
+          theme="dark"
+          mode="inline"
+          selectedKeys={[currentView]}
+          items={menuItems}
+          onClick={({ key }) => onChangeView(key as View)}
+          inlineCollapsed={collapsed}
+          style={{ background: 'transparent', border: 'none' }}
+        />
+      </div>
+
+      {/* ───── 用户信息与退出 ───── */}
+      <div style={{
+        borderTop: '1px solid rgba(255,255,255,0.06)',
+        padding: collapsed ? '12px 0' : '12px 16px',
+      }}>
+        {!collapsed ? (
+          <>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '4px 4px 12px' }}>
+              {/* 点击头像触发文件选择 */}
+              <Upload
+                accept="image/*"
+                showUploadList={false}
+                beforeUpload={handleAvatarUpload}
+              >
+                <Tooltip title="点击更换头像" placement="right">
+                  <Avatar
+                    size={40}
+                    src={avatarUrl || undefined}
+                    icon={!avatarUrl ? <UserOutlined /> : undefined}
+                    style={{
+                      cursor: 'pointer',
+                      border: '1px solid rgba(255,255,255,0.15)',
+                      background: avatarUrl ? 'transparent' : 'rgba(22,119,255,0.2)',
+                      flexShrink: 0,
+                    }}
+                  />
+                </Tooltip>
+              </Upload>
+              <div style={{ overflow: 'hidden' }}>
+                <Text style={{ color: '#fff', fontSize: 13, fontWeight: 600, display: 'block' }} ellipsis>
+                  {displayName}
+                </Text>
+                <Text style={{ color: 'var(--color-text-secondary)', fontSize: 11 }} ellipsis>
+                  {roleText}
+                </Text>
+              </div>
+            </div>
+            <Button
+              onClick={onLogout}
+              icon={<LogoutOutlined />}
+              block
+              size="small"
+              style={{
+                background: 'rgba(255,255,255,0.05)',
+                border: '1px solid rgba(255,255,255,0.08)',
+                color: 'var(--color-text-tertiary)',
+              }}
+            >
+              退出登录
+            </Button>
+          </>
+        ) : (
+          /* 折叠状态下只显示退出图标 */
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
+            <Upload accept="image/*" showUploadList={false} beforeUpload={handleAvatarUpload}>
+              <Tooltip title={displayName} placement="right">
+                <Avatar
+                  size={36}
+                  src={avatarUrl || undefined}
+                  icon={!avatarUrl ? <UserOutlined /> : undefined}
+                  style={{ cursor: 'pointer', border: '1px solid rgba(255,255,255,0.15)', background: avatarUrl ? 'transparent' : 'rgba(22,119,255,0.2)' }}
+                />
+              </Tooltip>
+            </Upload>
+            <Tooltip title="退出登录" placement="right">
+              <Button
+                onClick={onLogout}
+                icon={<LogoutOutlined />}
+                size="small"
+                type="text"
+                style={{ color: 'var(--color-text-secondary)' }}
+              />
+            </Tooltip>
+          </div>
+        )}
+      </div>
+    </div>
   );
 };

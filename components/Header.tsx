@@ -1,120 +1,179 @@
 import React, { useState } from 'react';
+import { Layout, Breadcrumb, Badge, Dropdown, List, Avatar, Typography, Space, Empty } from 'antd';
+import { BellOutlined, UserOutlined, RobotOutlined, CloudUploadOutlined, WarningOutlined, ShareAltOutlined } from '@ant-design/icons';
 import { CurrentUser } from '../types';
 import { dashboardApi, ActivityInfo } from '../services/api';
 
-interface HeaderProps {
+const { Header } = Layout;
+const { Text } = Typography;
+
+interface AppHeaderProps {
   title: string;
   subtitle?: string;
   user?: CurrentUser | null;
 }
 
-export const Header: React.FC<HeaderProps> = ({ title, subtitle, user }) => {
-  const [showNotifications, setShowNotifications] = useState(false);
+/** 根据活动类型返回对应图标和颜色 */
+const getActivityStyle = (type: string) => {
+  switch (type) {
+    case 'AI_ANALYSIS':      return { icon: <RobotOutlined />,       color: 'var(--color-primary)' };
+    case 'UPLOAD':           return { icon: <CloudUploadOutlined />,  color: '#10b981' };
+    case 'ALERT':            return { icon: <WarningOutlined />,      color: 'var(--color-error)' };
+    case 'KNOWLEDGE_UPDATE': return { icon: <ShareAltOutlined />,     color: '#8b5cf6' };
+    default:                 return { icon: <BellOutlined />,         color: 'var(--color-text-tertiary)' };
+  }
+};
+
+/**
+ * 应用顶部栏
+ *
+ * NOTE: 使用 Ant Design Dropdown + List 替换手写通知面板。
+ * 通知数据同样按需加载（首次展开时请求）。
+ */
+export const AppHeader: React.FC<AppHeaderProps> = ({ title, subtitle, user }) => {
   const [notifications, setNotifications] = useState<ActivityInfo[]>([]);
   const [loaded, setLoaded] = useState(false);
+  const [loading, setLoading] = useState(false);
 
-  /** 点击通知图标时按需加载最新动态 */
-  const handleToggleNotifications = async () => {
-    if (!showNotifications && !loaded) {
+  const displayName = user?.realName || user?.username || '用户';
+  const department = user?.department || user?.role || '';
+
+  /** 通知面板展开时按需加载 */
+  const handleOpenChange = async (open: boolean) => {
+    if (open && !loaded) {
+      setLoading(true);
       try {
         const data = await dashboardApi.getActivities(4);
         setNotifications(data);
         setLoaded(true);
       } catch {
-        // NOTE: 后端未连接时静默降级
+        // NOTE: 后端未连接时静默降级，不显示错误
+      } finally {
+        setLoading(false);
       }
     }
-    setShowNotifications(!showNotifications);
   };
 
-  /** 根据活动类型返回对应的图标和颜色 */
-  const getActivityStyle = (type: string) => {
-    switch (type) {
-      case 'AI_ANALYSIS': return { icon: 'smart_toy', bg: 'bg-blue-100', color: 'text-primary' };
-      case 'UPLOAD': return { icon: 'upload_file', bg: 'bg-emerald-100', color: 'text-emerald-600' };
-      case 'ALERT': return { icon: 'priority_high', bg: 'bg-red-100', color: 'text-accent-red' };
-      case 'KNOWLEDGE_UPDATE': return { icon: 'share', bg: 'bg-purple-100', color: 'text-purple-600' };
-      default: return { icon: 'notifications', bg: 'bg-slate-100', color: 'text-slate-500' };
-    }
-  };
-
-  const displayName = user?.realName || user?.username || '用户';
-  const department = user?.department || user?.role || '';
+  /** 通知面板内容 */
+  const notificationPanel = (
+    <div style={{
+      width: 320,
+      background: 'var(--color-bg-panel)',
+      borderRadius: 'var(--radius-md)',
+      boxShadow: '0 8px 32px rgba(0,0,0,0.12)',
+      overflow: 'hidden',
+    }}>
+      <div style={{
+        padding: '12px 16px',
+        borderBottom: '1px solid var(--color-border)',
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+      }}>
+        <Text strong style={{ fontSize: 14 }}>最新动态</Text>
+        {notifications.length > 0 && (
+          <Text style={{ fontSize: 11, color: 'var(--color-primary)', background: 'var(--color-primary-soft)', padding: '2px 8px', borderRadius: 10, fontWeight: 600 }}>
+            {notifications.length} 条
+          </Text>
+        )}
+      </div>
+      {loading ? (
+        <div style={{ padding: 32, textAlign: 'center', color: 'var(--color-text-tertiary)', fontSize: 13 }}>加载中...</div>
+      ) : notifications.length === 0 ? (
+        <Empty description="暂无动态" style={{ padding: '24px 0' }} />
+      ) : (
+        <List<ActivityInfo>
+          dataSource={notifications}
+          renderItem={(item: ActivityInfo) => {
+            const style = getActivityStyle(item.type);
+            return (
+              <List.Item style={{ padding: '12px 16px', borderBottom: '1px solid #fafafa' }}>
+                <List.Item.Meta
+                  avatar={
+                    <Avatar
+                      icon={style.icon}
+                      style={{ background: `${style.color}18`, color: style.color, flexShrink: 0 }}
+                    />
+                  }
+                  title={<Text strong style={{ fontSize: 12 }}>{item.title}</Text>}
+                  description={
+                    <Space direction="vertical" size={0}>
+                      <Text type="secondary" style={{ fontSize: 11 }}>{item.description}</Text>
+                      <Text type="secondary" style={{ fontSize: 10 }}>{item.createdAt}</Text>
+                    </Space>
+                  }
+                />
+              </List.Item>
+            );
+          }}
+        />
+      )}
+    </div>
+  );
 
   return (
-    <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-8 z-20 shrink-0 relative">
-      <div className="flex items-center gap-4">
-        <div className="flex items-center gap-2 text-sm text-slate-500">
-          <span>智教思政</span>
-          <span className="material-symbols-outlined text-xs">chevron_right</span>
-          <span className="text-slate-900 font-medium text-base">{title}</span>
-          {subtitle && (
-            <>
-              <span className="material-symbols-outlined text-xs">chevron_right</span>
-              <span className="text-slate-500 text-sm">{subtitle}</span>
-            </>
-          )}
-        </div>
-      </div>
-      <div className="flex items-center gap-6">
-        <div className="flex items-center gap-1 relative">
-          <button
-            onClick={handleToggleNotifications}
-            className={`p-2 rounded-full relative transition-colors ${showNotifications ? 'bg-slate-100 text-primary' : 'text-slate-500 hover:bg-slate-100'}`}
-          >
-            <span className="material-symbols-outlined">notifications</span>
-            {notifications.length > 0 && (
-              <span className="absolute top-2 right-2 size-2 bg-red-500 rounded-full border-2 border-white"></span>
-            )}
-          </button>
+    <Header style={{
+      background: 'var(--color-bg-panel)',
+      borderBottom: '1px solid var(--color-border)',
+      padding: '0 32px',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      height: 56,
+      lineHeight: '56px',
+      position: 'sticky',
+      top: 0,
+      zIndex: 10,
+      flexShrink: 0,
+    }}>
+      {/* 左侧面包屑 */}
+      <Breadcrumb
+        items={[
+          { title: <Text type="secondary" style={{ fontSize: 13 }}>智教思政</Text> },
+          { title: <Text strong style={{ fontSize: 14 }}>{title}</Text> },
+          ...(subtitle ? [{ title: <Text type="secondary" style={{ fontSize: 13 }}>{subtitle}</Text> }] : []),
+        ]}
+        separator="›"
+      />
 
-          {showNotifications && (
-            <>
-              <div
-                className="fixed inset-0 z-10"
-                onClick={() => setShowNotifications(false)}
-              ></div>
-              <div className="absolute top-full right-0 mt-2 w-80 bg-white border border-slate-200 rounded-xl shadow-xl z-20 overflow-hidden animate-in fade-in slide-in-from-top-2 duration-200">
-                <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
-                  <h3 className="text-sm font-bold text-slate-900">最新动态</h3>
-                  {notifications.length > 0 && (
-                    <span className="text-[10px] bg-primary/10 text-primary px-1.5 py-0.5 rounded font-bold">{notifications.length} 条</span>
-                  )}
-                </div>
-                <div className="max-h-[400px] overflow-y-auto">
-                  {notifications.length > 0 ? notifications.map((item) => {
-                    const style = getActivityStyle(item.type);
-                    return (
-                      <div key={item.id} className="flex gap-3 items-start p-4 hover:bg-slate-50 transition-colors border-b border-slate-50 last:border-0">
-                        <div className={`w-8 h-8 rounded-full ${style.bg} flex items-center justify-center ${style.color} flex-shrink-0`}>
-                          <span className="material-symbols-outlined text-[16px]">{style.icon}</span>
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-xs text-slate-800 font-bold truncate">{item.title}</p>
-                          <p className="text-[11px] text-slate-500 mt-0.5 truncate">{item.description}</p>
-                          <p className="text-[10px] text-slate-400 mt-1.5">{item.createdAt}</p>
-                        </div>
-                      </div>
-                    );
-                  }) : (
-                    <div className="p-8 text-center text-slate-400 text-sm">暂无动态</div>
-                  )}
-                </div>
-              </div>
-            </>
-          )}
-        </div>
-        <div className="h-8 w-px bg-slate-200"></div>
-        <div className="flex items-center gap-3">
-          <div className="text-right hidden sm:block">
-            <p className="text-sm font-semibold leading-none">{displayName}</p>
-            <p className="text-[10px] text-slate-500 mt-1">{department}</p>
+      {/* 右侧操作区 */}
+      <Space size={16} align="center">
+        {/* 通知铃铛 */}
+        <Dropdown
+          dropdownRender={() => notificationPanel}
+          trigger={['click']}
+          onOpenChange={handleOpenChange}
+          placement="bottomRight"
+        >
+          <Badge count={notifications.length} size="small" offset={[-2, 2]}>
+            <BellOutlined
+              style={{
+                fontSize: 18,
+                color: 'var(--color-text-secondary)',
+                cursor: 'pointer',
+                padding: 6,
+                borderRadius: 'var(--radius-sm)',
+                transition: 'background 0.2s',
+              }}
+              onMouseEnter={e => (e.currentTarget.style.background = '#f5f5f5')}
+              onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+            />
+          </Badge>
+        </Dropdown>
+
+        {/* 分隔线 */}
+        <div style={{ width: 1, height: 20, background: '#e2e8f0' }} />
+
+        {/* 用户信息 */}
+        <Space size={8} align="center">
+          <div style={{ textAlign: 'right' }}>
+            <div style={{ fontSize: 13, fontWeight: 600, lineHeight: 1.3, color: 'var(--color-text-primary)' }}>{displayName}</div>
+            <div style={{ fontSize: 11, color: 'var(--color-text-tertiary)', lineHeight: 1.3 }}>{department}</div>
           </div>
-          <div className="size-9 rounded-full bg-primary/10 border border-primary/20 flex items-center justify-center">
-            <span className="material-symbols-outlined text-primary text-xl">person</span>
-          </div>
-        </div>
-      </div>
-    </header>
+          <Avatar
+            icon={<UserOutlined />}
+            style={{ background: 'var(--color-primary-soft)', color: 'var(--color-primary)', border: '1px solid rgba(22,119,255,0.2)' }}
+          />
+        </Space>
+      </Space>
+    </Header>
   );
 };

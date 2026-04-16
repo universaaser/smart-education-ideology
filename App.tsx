@@ -1,4 +1,5 @@
 import React from 'react';
+import { Spin } from 'antd';
 import { Auth } from './views/Auth';
 import { TeacherShell } from './layouts/TeacherShell';
 import { StudentShell } from './layouts/StudentShell';
@@ -9,11 +10,14 @@ export default function App() {
 
   if (isLoading) {
     return (
-      <div className="flex h-screen w-full items-center justify-center bg-background-light">
-        <div className="flex flex-col items-center gap-4">
-          <div className="size-12 border-4 border-primary/20 border-t-primary rounded-full animate-spin"></div>
-          <p className="text-sm text-slate-500 font-medium">加载中...</p>
-        </div>
+      <div style={{
+        height: '100vh', display: 'flex',
+        alignItems: 'center', justifyContent: 'center',
+        background: 'var(--bg-light)',
+        flexDirection: 'column', gap: 16,
+      }}>
+        <Spin size="large" />
+        <span style={{ color: '#94a3b8', fontSize: 13 }}>加载中...</span>
       </div>
     );
   }
@@ -27,7 +31,8 @@ export default function App() {
     return <StudentShell />;
   }
 
-  // 默认使用教师外壳 (包括 ADMIN)
+  // 默认使用教师外壳（包括 ADMIN）
   return <TeacherShell />;
 }
+
 

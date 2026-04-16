@@ -1,0 +1,133 @@
+/*
+ * 全局样式
+ * NOTE: Tailwind CDN 已移除，改用 Ant Design 主题 Token + 原生 CSS 变量。
+ * 此文件保留不与 Ant Design 冲突的全局样式。
+ */
+
+/* ───────── CSS 变量（与 Ant Design Token 对齐）───────── */
+:root {
+  /* 品牌主色（与 Ant Design token.colorPrimary 对齐） */
+  --color-primary: #1677ff;
+  --color-primary-hover: #4096ff;
+  --color-primary-soft: #e6f4ff;
+  /* 页面与面板背景 */
+  --color-bg-page: #f6f6f8;
+  --color-bg-panel: #ffffff;
+  --color-bg-muted: #f8fafc;
+  /* 文本语义色 */
+  --color-text-primary: #1a1a2e;
+  --color-text-secondary: #64748b;
+  --color-text-tertiary: #94a3b8;
+  /* 边框与分隔线 */
+  --color-border: #f0f0f0;
+  --color-border-strong: #d9d9d9;
+  /* 状态色 */
+  --color-success: #52c41a;
+  --color-warning: #f59e0b;
+  --color-error: #ef4444;
+  --color-danger-soft: #fff1f0;
+  /* 侧边栏与布局扩展变量 */
+  --sidebar-bg: #0f172a;
+  --sidebar-trigger-bg: #1a2744;
+  /* 圆角语义变量 */
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 20px;
+  /* 历史兼容变量：保留现有引用，避免改动过大 */
+  --bg-light: var(--color-bg-page);
+  /* 知识图谱节点色（保留专项变量） */
+  --node-tech: var(--color-primary);
+  --node-ideo: var(--color-error);
+}
+
+/* ───────── 基础重置 ───────── */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: 'Noto Sans SC', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  background-color: var(--color-bg-page);
+  color: var(--color-text-primary);
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+
+/* ───────── 自定义滚动条 ───────── */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* ───────── 知识图谱专用样式 ───────── */
+/* NOTE: 保留知识图谱的点状背景图案，SVG 画布依赖此类名 */
+.graph-pattern {
+  background-image: radial-gradient(#e5e7eb 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+/* ───────── Material Symbols 字体设置 ───────── */
+.material-symbols-outlined {
+  font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+  /* 防止图标文字被选中 */
+  user-select: none;
+}
+
+/* ───────── Ant Design 组件微调 ───────── */
+
+/* 覆盖 Ant Design 全局 body 字体为中文首选 */
+.ant-app {
+  font-family: 'Noto Sans SC', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+/* 侧边栏菜单项选中态阴影，Ant Design Menu 默认无此效果 */
+.ant-menu-item-selected {
+  box-shadow: 0 4px 12px rgba(22, 119, 255, 0.25) !important;
+}
+
+/* 统一 Ant Design Card 圆角风格 */
+.ant-card {
+  border-radius: 12px !important;
+}
+
+/* ───────── 工具类（最小集合）───────── */
+/* NOTE: 仅保留 Ant Design 无法覆盖的布局工具类 */
+
+/* 满高屏幕布局 */
+.h-screen {
+  height: 100vh;
+}
+
+/* 溢出隐藏 */
+.overflow-hidden {
+  overflow: hidden;
+}
+
+/* 知识图谱画布满尺寸 */
+.graph-canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+/* 字体显示层级（标题专用字体） */
+.font-display {
+  font-family: 'Lexend', 'Noto Sans SC', sans-serif;
+}

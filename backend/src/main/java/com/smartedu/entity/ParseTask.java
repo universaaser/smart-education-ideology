@@ -34,6 +34,8 @@ public class ParseTask {
      */
     private Long userId;
 
+    private Long courseId;
+
     /**
      * 文件名
      */

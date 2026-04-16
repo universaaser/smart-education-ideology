@@ -1,198 +1,277 @@
 import React, { useState } from 'react';
+import {
+  Form, Input, Button, Alert, Card, Segmented, Radio,
+  Typography, Space, Divider,
+} from 'antd';
+import {
+  UserOutlined, LockOutlined, MailOutlined,
+  BookOutlined, ReadOutlined, ArrowRightOutlined,
+} from '@ant-design/icons';
 import { authApi, setToken } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 
+const { Title, Text } = Typography;
+
+type TabKey = 'login' | 'register';
+type RoleKey = 'TEACHER' | 'STUDENT';
+
+interface FormValues {
+  username: string;
+  password: string;
+  email?: string;
+  role: RoleKey;
+}
+
+/**
+ * 登录 / 注册页
+ *
+ * NOTE: 使用 Ant Design Form 替换手写 form，享受表单校验和字段联动能力。
+ * Segmented 替换登录/注册切换按钮，Radio.Group 替换角色选择按钮。
+ */
 export const Auth: React.FC = () => {
   const { login } = useAuth();
-  const [isLogin, setIsLogin] = useState(true);
+  const [form] = Form.useForm<FormValues>();
+  const [tab, setTab] = useState<TabKey>('login');
   const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState('');
-  const [formData, setFormData] = useState({
-    username: '',
-    password: '',
-    email: '',
-    role: 'TEACHER'
-  });
+  const [errorMsg, setErrorMsg] = useState('');
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  /** 切换登录/注册 Tab 时重置表单和错误 */
+  const handleTabChange = (val: string) => {
+    setTab(val as TabKey);
+    setErrorMsg('');
+    form.resetFields();
+    // 注册时默认角色为 TEACHER
+    form.setFieldValue('role', 'TEACHER');
+  };
+
+  const handleSubmit = async (values: FormValues) => {
     setIsLoading(true);
-    setError('');
+    setErrorMsg('');
 
     try {
-      if (isLogin) {
-        const result = await authApi.login(formData.username, formData.password);
+      if (tab === 'login') {
+        const result = await authApi.login(values.username, values.password);
         setToken(result.token);
       } else {
         const result = await authApi.register(
-          formData.username,
-          formData.password,
-          formData.email,
-          formData.role
+          values.username,
+          values.password,
+          values.email || '',
+          values.role,
         );
         setToken(result.token);
       }
-      
-      // 成功获取 token 后，通过 bootstrap 接口拉取完整的用户数据和配置
+
+      // 成功获取 token 后通过 bootstrap 接口拉取完整用户数据
       const bootstrapData = await authApi.bootstrap();
       login(bootstrapData);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : '操作失败，请重试';
-      setError(message);
+      setErrorMsg(message);
     } finally {
       setIsLoading(false);
     }
   };
 
   return (
-    <div className="min-h-screen w-full flex items-center justify-center bg-background-light relative overflow-hidden font-body">
-      {/* 背景装饰 */}
-      <div className="absolute top-0 left-0 w-full h-full pointer-events-none overflow-hidden">
-        <div className="absolute -top-24 -left-24 w-96 h-96 bg-primary/5 rounded-full blur-3xl"></div>
-        <div className="absolute top-1/2 -right-24 w-64 h-64 bg-accent-red/5 rounded-full blur-3xl"></div>
-      </div>
+    <div style={{
+      minHeight: '100vh',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      background: 'var(--bg-light)',
+      position: 'relative',
+      overflow: 'hidden',
+    }}>
+      {/* 背景装饰光晕 */}
+      <div style={{
+        position: 'absolute', top: -96, left: -96,
+        width: 384, height: 384,
+        background: 'rgba(22,119,255,0.06)', borderRadius: '50%', filter: 'blur(60px)',
+        pointerEvents: 'none',
+      }} />
+      <div style={{
+        position: 'absolute', top: '50%', right: -96,
+        width: 256, height: 256,
+        background: 'rgba(239,68,68,0.05)', borderRadius: '50%', filter: 'blur(60px)',
+        pointerEvents: 'none',
+      }} />
 
-      <div className="w-full max-w-md p-8 relative z-10">
-        {/* Logo */}
-        <div className="flex flex-col items-center mb-10">
-          <div className="size-16 bg-primary rounded-2xl flex items-center justify-center text-white shadow-2xl shadow-primary/40 mb-4 animate-in zoom-in-50 duration-500">
-            <span className="material-symbols-outlined text-4xl">auto_awesome</span>
+      <div style={{ width: '100%', maxWidth: 420, padding: '0 20px', position: 'relative', zIndex: 1 }}>
+        {/* Logo 区 */}
+        <div style={{ textAlign: 'center', marginBottom: 32 }}>
+          <div style={{
+            width: 64, height: 64,
+            background: 'var(--color-primary)',
+            borderRadius: 16,
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+            boxShadow: '0 8px 32px rgba(22,119,255,0.4)',
+            marginBottom: 16,
+          }}>
+            <span className="material-symbols-outlined" style={{ color: '#fff', fontSize: 32 }}>auto_awesome</span>
           </div>
-          <h1 className="text-3xl font-bold text-slate-900 font-display tracking-tight">智教思政</h1>
-          <p className="text-slate-500 mt-2 text-sm font-medium">智慧教学辅助系统 · 登录入口</p>
+          <Title level={2} style={{ margin: 0, fontFamily: "'Lexend', sans-serif", fontWeight: 700 }}>
+            智教思政
+          </Title>
+          <Text type="secondary" style={{ fontSize: 13 }}>智慧教学辅助系统 · 登录入口</Text>
         </div>
 
-        {/* 认证卡片 */}
-        <div className="bg-white rounded-3xl shadow-2xl shadow-slate-200/60 border border-slate-100 overflow-hidden animate-in fade-in slide-in-from-bottom-8 duration-700">
-          <div className="flex border-b border-slate-50">
-            <button
-              onClick={() => { setIsLogin(true); setError(''); }}
-              className={`flex-1 py-4 text-sm font-bold transition-all ${isLogin ? 'text-primary border-b-2 border-primary' : 'text-slate-400 hover:text-slate-600'}`}
-            >
-              登 录
-            </button>
-            <button
-              onClick={() => { setIsLogin(false); setError(''); }}
-              className={`flex-1 py-4 text-sm font-bold transition-all ${!isLogin ? 'text-primary border-b-2 border-primary' : 'text-slate-400 hover:text-slate-600'}`}
-            >
-              注 册
-            </button>
+        <Card
+          style={{ borderRadius: 20, boxShadow: '0 8px 40px rgba(0,0,0,0.08)', border: '1px solid var(--color-border)' }}
+          bodyStyle={{ padding: '28px 32px 24px' }}
+        >
+          {/* 登录/注册切换 */}
+          <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 24 }}>
+            <Segmented
+              options={[
+                { label: '登  录', value: 'login' },
+                { label: '注  册', value: 'register' },
+              ]}
+              value={tab}
+              onChange={handleTabChange}
+              block
+              style={{ width: '100%' }}
+            />
           </div>
 
-          <form onSubmit={handleSubmit} className="p-8 space-y-5">
-            {/* 错误提示 */}
-            {error && (
-              <div className="bg-red-50 border border-red-200 text-red-600 text-sm px-4 py-3 rounded-xl flex items-center gap-2">
-                <span className="material-symbols-outlined text-sm">error</span>
-                {error}
-              </div>
-            )}
+          {/* 错误提示 */}
+          {errorMsg && (
+            <Alert
+              type="error"
+              message={errorMsg}
+              showIcon
+              style={{ marginBottom: 20, borderRadius: 8 }}
+            />
+          )}
 
-            {!isLogin && (
+          <Form
+            form={form}
+            layout="vertical"
+            onFinish={handleSubmit}
+            initialValues={{ role: 'TEACHER' }}
+            requiredMark={false}
+          >
+            {/* 注册专属：角色选择 + 邮箱 */}
+            {tab === 'register' && (
               <>
-                <div className="flex gap-4 mb-2">
-                  <button
-                    type="button"
-                    onClick={() => setFormData({ ...formData, role: 'TEACHER' })}
-                    className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-bold border transition-all ${
-                      formData.role === 'TEACHER'
-                        ? 'border-primary bg-primary/10 text-primary shadow-sm'
-                        : 'border-slate-200 text-slate-500 hover:bg-slate-50'
-                    }`}
-                  >
-                    <span className="material-symbols-outlined text-[18px]">school</span>
-                    教师注册
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setFormData({ ...formData, role: 'STUDENT' })}
-                    className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-bold border transition-all ${
-                      formData.role === 'STUDENT'
-                        ? 'border-primary bg-primary/10 text-primary shadow-sm'
-                        : 'border-slate-200 text-slate-500 hover:bg-slate-50'
-                    }`}
-                  >
-                    <span className="material-symbols-outlined text-[18px]">person_book</span>
-                    学生注册
-                  </button>
-                </div>
+                <Form.Item name="role">
+                  <Radio.Group style={{ width: '100%', marginBottom: 4 }}>
+                    <Space style={{ width: '100%' }}>
+                      <Radio.Button
+                        value="TEACHER"
+                        style={{ flex: 1, textAlign: 'center', borderRadius: 8 }}
+                      >
+                        <BookOutlined /> 教师注册
+                      </Radio.Button>
+                      <Radio.Button
+                        value="STUDENT"
+                        style={{ flex: 1, textAlign: 'center', borderRadius: 8 }}
+                      >
+                        <ReadOutlined /> 学生注册
+                      </Radio.Button>
+                    </Space>
+                  </Radio.Group>
+                </Form.Item>
 
-                <div className="space-y-1.5">
-                  <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider ml-1">
-                    {formData.role === 'TEACHER' ? '教工邮箱' : '联系邮箱'}
-                  </label>
-                  <div className="relative group">
-                    <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xl group-focus-within:text-primary transition-colors">mail</span>
-                    <input
-                      required
-                      type="email"
-                      className="w-full h-11 pl-10 pr-4 rounded-xl border border-slate-200 bg-slate-50 focus:bg-white focus:ring-4 focus:ring-primary/10 focus:border-primary outline-none transition-all text-sm"
-                      placeholder={formData.role === 'TEACHER' ? 'example@university.edu.cn' : 'student@stu.university.edu.cn'}
-                      value={formData.email}
-                      onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                    />
-                  </div>
-                </div>
+                {/* 动态 label：教师用"教工邮箱"，学生用"联系邮箱" */}
+                <Form.Item
+                  shouldUpdate={(prev, curr) => prev.role !== curr.role}
+                  noStyle
+                >
+                  {({ getFieldValue }) => (
+                    <Form.Item
+                      label={getFieldValue('role') === 'TEACHER' ? '教工邮箱' : '联系邮箱'}
+                      name="email"
+                      rules={[
+                        { required: true, message: '请输入邮箱' },
+                        { type: 'email', message: '邮箱格式不正确' },
+                      ]}
+                    >
+                      <Input
+                        prefix={<MailOutlined style={{ color: 'var(--color-text-tertiary)' }} />}
+                        placeholder={
+                          getFieldValue('role') === 'TEACHER'
+                            ? 'example@university.edu.cn'
+                            : 'student@stu.university.edu.cn'
+                        }
+                        size="large"
+                      />
+                    </Form.Item>
+                  )}
+                </Form.Item>
               </>
             )}
 
-            <div className="space-y-1.5">
-              <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider ml-1">
-                {formData.role === 'TEACHER' ? '用户名 / 教工号' : '用户名 / 学号'}
-              </label>
-              <div className="relative group">
-                <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xl group-focus-within:text-primary transition-colors">person</span>
-                <input
-                  required
-                  type="text"
-                  className="w-full h-11 pl-10 pr-4 rounded-xl border border-slate-200 bg-slate-50 focus:bg-white focus:ring-4 focus:ring-primary/10 focus:border-primary outline-none transition-all text-sm"
-                  placeholder="请输入您的账号"
-                  value={formData.username}
-                  onChange={(e) => setFormData({ ...formData, username: e.target.value })}
-                />
-              </div>
-            </div>
-
-            <div className="space-y-1.5">
-              <div className="flex justify-between items-center">
-                <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider ml-1">密码</label>
-                {isLogin && (
-                  <button type="button" className="text-[10px] text-primary hover:underline font-bold">忘记密码?</button>
-                )}
-              </div>
-              <div className="relative group">
-                <span className="material-symbols-outlined absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xl group-focus-within:text-primary transition-colors">lock</span>
-                <input
-                  required
-                  type="password"
-                  className="w-full h-11 pl-10 pr-4 rounded-xl border border-slate-200 bg-slate-50 focus:bg-white focus:ring-4 focus:ring-primary/10 focus:border-primary outline-none transition-all text-sm"
-                  placeholder="••••••••"
-                  value={formData.password}
-                  onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                />
-              </div>
-            </div>
-
-            <button
-              disabled={isLoading}
-              type="submit"
-              className="w-full h-12 bg-primary hover:bg-blue-700 text-white rounded-xl font-bold shadow-lg shadow-primary/30 transition-all flex items-center justify-center gap-3 active:scale-95 disabled:opacity-70 disabled:cursor-not-allowed"
+            {/* 用户名 */}
+            <Form.Item
+              label={
+                <Form.Item shouldUpdate={(p, c) => p.role !== c.role} noStyle>
+                  {({ getFieldValue }) =>
+                    getFieldValue('role') === 'TEACHER' ? '用户名 / 教工号' : '用户名 / 学号'
+                  }
+                </Form.Item>
+              }
+              name="username"
+              rules={[{ required: true, message: '请输入用户名' }]}
             >
-              {isLoading ? (
-                <div className="size-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
-              ) : (
-                <>
-                  <span>{isLogin ? '立即登录' : '创建账户'}</span>
-                  <span className="material-symbols-outlined text-[18px]">arrow_forward</span>
-                </>
-              )}
-            </button>
-          </form>
-        </div>
+              <Input
+                prefix={<UserOutlined style={{ color: 'var(--color-text-tertiary)' }} />}
+                placeholder="请输入您的账号"
+                size="large"
+              />
+            </Form.Item>
 
-        <p className="mt-8 text-center text-xs text-slate-400">
-          登录即代表您同意 <a href="#" className="text-primary hover:underline">《服务协议》</a> 与 <a href="#" className="text-primary hover:underline">《隐私政策》</a>
-        </p>
+            {/* 密码 */}
+            <Form.Item
+              label={
+                <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%' }}>
+                  <span>密码</span>
+                  {tab === 'login' && (
+                    <Button type="link" size="small" style={{ padding: 0, height: 'auto', fontSize: 12 }}>
+                      忘记密码?
+                    </Button>
+                  )}
+                </div>
+              }
+              name="password"
+              rules={[{ required: true, message: '请输入密码' }]}
+            >
+              <Input.Password
+                prefix={<LockOutlined style={{ color: 'var(--color-text-tertiary)' }} />}
+                placeholder="••••••••"
+                size="large"
+              />
+            </Form.Item>
+
+            {/* 提交按钮 */}
+            <Form.Item style={{ marginTop: 8, marginBottom: 0 }}>
+              <Button
+                type="primary"
+                htmlType="submit"
+                loading={isLoading}
+                block
+                size="large"
+                icon={!isLoading ? <ArrowRightOutlined /> : undefined}
+                iconPosition="end"
+                style={{
+                  height: 48, borderRadius: 12, fontWeight: 700, fontSize: 15,
+                  boxShadow: '0 4px 16px rgba(22,119,255,0.35)',
+                }}
+              >
+                {tab === 'login' ? '立即登录' : '创建账户'}
+              </Button>
+            </Form.Item>
+          </Form>
+        </Card>
+
+        <Divider style={{ margin: '20px 0 0' }}>
+          <Text type="secondary" style={{ fontSize: 11 }}>
+            登录即代表同意
+            <Button type="link" size="small" style={{ padding: '0 2px', fontSize: 11 }}>《服务协议》</Button>
+            与
+            <Button type="link" size="small" style={{ padding: '0 2px', fontSize: 11 }}>《隐私政策》</Button>
+          </Text>
+        </Divider>
       </div>
     </div>
   );

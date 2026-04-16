@@ -3,6 +3,10 @@ package com.smartedu.service;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.smartedu.dto.DocumentStructureDto;
+import com.smartedu.dto.IdeologyMatchDto;
+import com.smartedu.dto.KnowledgePointDto;
+import com.smartedu.dto.PipelineResultDto;
 import com.smartedu.entity.IdeologyKnowledge;
 import com.smartedu.entity.KnowledgeRelation;
 import com.smartedu.entity.ParseTask;
@@ -114,6 +118,11 @@ public class KnowledgeIngestionService {
     private Resource upsertResourceFromParseTask(ParseTask task) {
         String syntheticSourceUrl = "upload://parse-task/" + task.getId();
         Resource existing = resourceService.getBySourceUrl(syntheticSourceUrl);
+        PipelineResultDto pipelineResult = parsePipelineResult(task.getAiAnalysis());
+        DocumentStructureDto documentStructure = parseDocumentStructure(task.getParsedContent());
+        String resourceContent = buildResourceContent(documentStructure, pipelineResult);
+        String ideologySummary = buildIdeologySummary(pipelineResult);
+        String tags = buildTagsFromTask(task, pipelineResult);
 
         if (existing == null) {
             Resource resource = new Resource();
@@ -121,9 +130,9 @@ public class KnowledgeIngestionService {
             resource.setSource("Uploaded Document");
             resource.setSourceUrl(syntheticSourceUrl);
             resource.setCategory("Document");
-            resource.setContent(truncate(task.getParsedContent(), 1500));
-            resource.setIdeologySummary(truncate(task.getAiAnalysis(), 1200));
-            resource.setTags(buildTagsFromTask(task));
+            resource.setContent(truncate(resourceContent, 1500));
+            resource.setIdeologySummary(truncate(ideologySummary, 1200));
+            resource.setTags(tags);
             resource.setFilePath(task.getFilePath());
             resource.setFileType(extractFileType(task.getFileName()));
             resource.setFileSize(task.getFileSize());
@@ -136,9 +145,9 @@ public class KnowledgeIngestionService {
         existing.setTitle(task.getFileName());
         existing.setSource("Uploaded Document");
         existing.setCategory("Document");
-        existing.setContent(truncate(task.getParsedContent(), 1500));
-        existing.setIdeologySummary(truncate(task.getAiAnalysis(), 1200));
-        existing.setTags(buildTagsFromTask(task));
+        existing.setContent(truncate(resourceContent, 1500));
+        existing.setIdeologySummary(truncate(ideologySummary, 1200));
+        existing.setTags(tags);
         existing.setFilePath(task.getFilePath());
         existing.setFileType(extractFileType(task.getFileName()));
         existing.setFileSize(task.getFileSize());
@@ -393,7 +402,7 @@ public class KnowledgeIngestionService {
         return result;
     }
 
-    private String buildTagsFromTask(ParseTask task) {
+    private String buildTagsFromTask(ParseTask task, PipelineResultDto pipelineResult) {
         List<String> tags = new ArrayList<>();
         tags.add("uploaded");
         tags.add("document");
@@ -407,11 +416,83 @@ public class KnowledgeIngestionService {
             tags.add("slide");
         }
 
+        if (pipelineResult != null && pipelineResult.getIdeologyMatches() != null) {
+            for (IdeologyMatchDto match : pipelineResult.getIdeologyMatches()) {
+                String ideologyElement = safe(match.getIdeologyElement());
+                if (!ideologyElement.isBlank() && !tags.contains(ideologyElement)) {
+                    tags.add(ideologyElement);
+                }
+            }
+        }
+
         try {
             return objectMapper.writeValueAsString(tags);
         } catch (Exception ex) {
             return "[\"uploaded\",\"document\"]";
         }
+    }
+
+    private PipelineResultDto parsePipelineResult(String aiAnalysisJson) {
+        if (aiAnalysisJson == null || aiAnalysisJson.isBlank()) {
+            return null;
+        }
+        try {
+            return objectMapper.readValue(aiAnalysisJson, PipelineResultDto.class);
+        } catch (Exception ex) {
+            log.warn("Failed to parse pipeline result from aiAnalysis, fallback to raw text: {}", ex.getMessage());
+            return null;
+        }
+    }
+
+    private DocumentStructureDto parseDocumentStructure(String parsedContentJson) {
+        if (parsedContentJson == null || parsedContentJson.isBlank()) {
+            return null;
+        }
+        try {
+            return objectMapper.readValue(parsedContentJson, DocumentStructureDto.class);
+        } catch (Exception ex) {
+            log.warn("Failed to parse document structure from parsedContent, fallback to raw text: {}", ex.getMessage());
+            return null;
+        }
+    }
+
+    private String buildResourceContent(DocumentStructureDto documentStructure, PipelineResultDto pipelineResult) {
+        List<String> lines = new ArrayList<>();
+        if (documentStructure != null) {
+            lines.add("Overview: " + safe(documentStructure.getOverview()));
+            if (documentStructure.getChapterOutline() != null && !documentStructure.getChapterOutline().isEmpty()) {
+                lines.add("Chapters: " + String.join(" | ", documentStructure.getChapterOutline()));
+            }
+        }
+
+        if (pipelineResult != null && pipelineResult.getKnowledgePoints() != null) {
+            for (KnowledgePointDto point : pipelineResult.getKnowledgePoints()) {
+                lines.add("- " + safe(point.getPointName()) + ": " + safe(point.getDefinition()));
+            }
+        }
+
+        String combined = String.join("\n", lines).trim();
+        if (!combined.isBlank()) {
+            return combined;
+        }
+
+        if (documentStructure != null) {
+            return safe(documentStructure.getOverview());
+        }
+
+        return "";
+    }
+
+    private String buildIdeologySummary(PipelineResultDto pipelineResult) {
+        if (pipelineResult == null || pipelineResult.getIdeologyMatches() == null || pipelineResult.getIdeologyMatches().isEmpty()) {
+            return "";
+        }
+
+        List<String> lines = new ArrayList<>();
+        for (IdeologyMatchDto match : pipelineResult.getIdeologyMatches()) {
+            lines.add(safe(match.getKnowledgePointName()) + " -> " + safe(match.getIdeologyElement()) + ": " + safe(match.getMatchReason()));
+        }
+        return String.join("\n", lines);
     }
 
     private String extractFileType(String fileName) {

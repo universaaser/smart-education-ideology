@@ -1,18 +1,21 @@
 import React, { useState, useEffect } from 'react';
 import { View } from '../types';
 import { dashboardApi, CourseInfo, ActivityInfo, TrendItem } from '../services/api';
+import {
+  Card, Statistic, Row, Col, Typography, Button, List, Avatar,
+  Table, Tag, Space, Progress, Spin, Empty
+} from 'antd';
+import {
+  RobotOutlined, CloudUploadOutlined, WarningOutlined,
+  ShareAltOutlined, InfoCircleOutlined, RiseOutlined,
+  ExportOutlined, EditOutlined, BookOutlined
+} from '@ant-design/icons';
+
+const { Title, Text } = Typography;
 
 interface DashboardProps {
   onChangeView: (view: View) => void;
 }
-
-/** 统计卡片的图标和颜色映射 */
-const STAT_CONFIG: Record<string, { icon: string; color: string }> = {
-  ideologyRate: { icon: 'psychology', color: 'blue' },
-  ideologyCount: { icon: 'auto_awesome', color: 'red' },
-  studentActivity: { icon: 'forum', color: 'purple' },
-  alertCount: { icon: 'warning', color: 'orange' },
-};
 
 export const Dashboard: React.FC<DashboardProps> = ({ onChangeView }) => {
   const [stats, setStats] = useState<Record<string, unknown>>({});
@@ -46,78 +49,28 @@ export const Dashboard: React.FC<DashboardProps> = ({ onChangeView }) => {
   /** 根据活动类型返回对应的显示样式 */
   const getActivityStyle = (type: string) => {
     switch (type) {
-      case 'AI_ANALYSIS': return { icon: 'smart_toy', bg: 'blue-100', color: 'primary' };
-      case 'UPLOAD': return { icon: 'upload_file', bg: 'emerald-100', color: 'emerald-600' };
-      case 'ALERT': return { icon: 'priority_high', bg: 'red-100', color: 'accent-red' };
-      case 'KNOWLEDGE_UPDATE': return { icon: 'share', bg: 'purple-100', color: 'purple-600' };
-      case 'GRAPH_UPDATE': return { icon: 'share', bg: 'purple-100', color: 'purple-600' };
-      default: return { icon: 'info', bg: 'slate-100', color: 'slate-500' };
+      case 'AI_ANALYSIS': return { icon: <RobotOutlined />, color: 'var(--color-primary)', bg: 'var(--color-primary-soft)' };
+      case 'UPLOAD': return { icon: <CloudUploadOutlined />, color: '#10b981', bg: '#d1fae5' };
+      case 'ALERT': return { icon: <WarningOutlined />, color: 'var(--color-error)', bg: '#fee2e2' };
+      case 'KNOWLEDGE_UPDATE':
+      case 'GRAPH_UPDATE': return { icon: <ShareAltOutlined />, color: '#8b5cf6', bg: '#ede9fe' };
+      default: return { icon: <InfoCircleOutlined />, color: 'var(--color-text-secondary)', bg: '#f1f5f9' };
     }
   };
 
   if (loading) {
     return (
-      <div className="flex-1 flex items-center justify-center bg-background-light">
-        <div className="flex flex-col items-center gap-4">
-          <div className="size-10 border-4 border-primary/20 border-t-primary rounded-full animate-spin"></div>
-          <p className="text-sm text-slate-400">加载仪表盘数据...</p>
-        </div>
+      <div style={{ display: 'flex', flex: 1, alignItems: 'center', justifyContent: 'center', height: '100%' }}>
+        <Space direction="vertical" align="center">
+          <Spin size="large" />
+          <Text type="secondary">加载仪表盘数据...</Text>
+        </Space>
       </div>
     );
   }
 
-  interface StatCard {
-    label: string;
-    value: string;
-    icon: string;
-    color: string;
-    change: string;
-    sub: string;
-    trend: 'up' | 'neutral' | 'down';
-    onClick?: () => void;
-  }
-
-  // 从后端返回的统计数据中提取各项指标
-  const statCards: StatCard[] = [
-    {
-      label: '思政融入率',
-      value: stats.ideologyRate != null ? `${stats.ideologyRate}%` : '--',
-      ...STAT_CONFIG.ideologyRate,
-      change: '',
-      sub: '知识点思政映射',
-      trend: 'up',
-    },
-    {
-      label: '思政元素挖掘数',
-      value: stats.ideologyCount != null ? String(stats.ideologyCount) : '--',
-      ...STAT_CONFIG.ideologyCount,
-      change: '',
-      sub: '已关联知识点',
-      trend: 'up',
-    },
-    {
-      label: '学生互动活跃度',
-      value: stats.studentActivity != null ? String(stats.studentActivity) : '--',
-      ...STAT_CONFIG.studentActivity,
-      change: '',
-      sub: '学习行为记录',
-      trend: 'up',
-    },
-    {
-      label: '待处理预警',
-      value: stats.alertCount != null ? String(stats.alertCount) : '0',
-      ...STAT_CONFIG.alertCount,
-      change: '需关注',
-      sub: '课程内容审核',
-      trend: 'neutral',
-      onClick: () => onChangeView(View.KNOWLEDGE_GRAPH),
-    },
-  ];
-
-  // 计算折线图的最大值，用于归一化
-  const maxTrend = Math.max(...trendData.map(t => t.value), 1);
-
-  /** 生成折线图 SVG 路径 */
+  // 计算折线图
+  const maxTrend = trendData.length > 0 ? Math.max(...trendData.map(t => t.value), 1) : 100;
   const chartWidth = 600;
   const chartHeight = 250;
   const chartPadding = { top: 20, right: 20, bottom: 40, left: 50 };
@@ -137,223 +90,268 @@ export const Dashboard: React.FC<DashboardProps> = ({ onChangeView }) => {
     }).join(' ')
     : '';
 
-  // 渐变填充区域路径
   const areaPath = trendData.length > 0
     ? linePath +
     ` L ${getPoint(trendData.length - 1, 0).x} ${chartPadding.top + innerHeight}` +
     ` L ${getPoint(0, 0).x} ${chartPadding.top + innerHeight} Z`
     : '';
 
+  const mapGradeColor = (color: string) => {
+    const mapping: Record<string, string> = {
+      'orange': 'warning',
+      'emerald': 'success',
+      'blue': 'processing',
+      'red': 'error',
+    };
+    return mapping[color] || 'default';
+  };
+
+  /**
+   * 将后端返回的 unknown 统计值转为 Statistic 可接受的数值类型。
+   * 仅对可安全转换的字符串执行 Number 转换，其他情况回落到占位符。
+   */
+  const toStatisticValue = (value: unknown, fallback: string | number = '--'): string | number => {
+    if (typeof value === 'number') return value;
+    if (typeof value === 'string' && value.trim() !== '') {
+      const parsed = Number(value);
+      return Number.isNaN(parsed) ? fallback : parsed;
+    }
+    return fallback;
+  };
+
+  const columns = [
+    {
+      title: '课程名称',
+      dataIndex: 'name',
+      key: 'name',
+      render: (name: string, record: CourseInfo) => (
+        <Space>
+          <Avatar shape="square" style={{ backgroundColor: 'var(--color-primary-soft)', color: 'var(--color-primary)' }}>
+            {name?.charAt(0) || '课'}
+          </Avatar>
+          <Text strong>{name}</Text>
+        </Space>
+      ),
+    },
+    {
+      title: '进度',
+      dataIndex: 'progress',
+      key: 'progress',
+      render: (progress: number) => (
+        <Progress percent={progress} size="small" style={{ width: 120 }} />
+      ),
+    },
+    {
+      title: '思政融合度',
+      dataIndex: 'gradeLabel',
+      key: 'gradeLabel',
+      render: (text: string, record: CourseInfo) => (
+        <Tag color={mapGradeColor(record.gradeColor || '')}>{text}</Tag>
+      ),
+    },
+    {
+      title: '操作',
+      key: 'action',
+      align: 'right' as const,
+      render: () => (
+        <Button type="text" icon={<EditOutlined />} style={{ color: 'var(--color-primary)' }} />
+      ),
+    },
+  ];
+
   return (
-    <div className="flex-1 overflow-y-auto p-8 scroll-smooth bg-background-light">
-      <div className="max-w-7xl mx-auto space-y-8">
+    <div style={{ flex: 1, overflowY: 'auto', padding: '32px' }}>
+      <div style={{ maxWidth: 1200, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '32px' }}>
+        
         {/* 欢迎区 */}
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4">
-          <div>
-            <h2 className="text-2xl font-display font-bold text-slate-900">欢迎回来 👋</h2>
-            <p className="text-slate-500 mt-1">这里是今日的教学概览与思政融合分析数据。</p>
-          </div>
-          <div className="flex gap-3">
-            <button className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 rounded-lg text-sm font-medium hover:bg-slate-50 transition-colors">
-              <span className="material-symbols-outlined text-[18px]">auto_awesome</span>
-              生成总结
-            </button>
-          </div>
-        </div>
+        <Row justify="space-between" align="bottom">
+          <Col>
+            <Title level={2} style={{ margin: 0, fontFamily: "'Lexend', sans-serif" }}>欢迎回来 👋</Title>
+            <Text type="secondary">这里是今日的教学概览与思政融合分析数据。</Text>
+          </Col>
+          <Col>
+            <Button icon={<RobotOutlined />}>生成总结</Button>
+          </Col>
+        </Row>
 
         {/* 统计卡片 */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-          {statCards.map((stat, idx) => (
-            <div
-              key={idx}
-              onClick={stat.onClick}
-              className={`bg-white p-6 rounded-xl border border-slate-100 shadow-sm relative overflow-hidden group hover:shadow-md transition-all ${stat.onClick ? 'cursor-pointer hover:border-orange-300 hover:bg-orange-50/10' : ''}`}
+        <Row gutter={[24, 24]}>
+          <Col xs={24} sm={12} lg={6}>
+            <Card bordered={false} hoverable>
+              <Statistic
+                title="思政融入率"
+                value={toStatisticValue(stats.ideologyRate)}
+                suffix="%"
+                valueStyle={{ color: 'var(--color-text-primary)', fontWeight: 'bold' }}
+                prefix={<ShareAltOutlined style={{ color: 'var(--color-primary)', marginRight: 8 }} />}
+              />
+              <div style={{ marginTop: 8, fontSize: 13 }}>
+                <Text type="success"><RiseOutlined /> </Text>
+                <Text type="secondary" style={{ marginLeft: 4 }}>知识点思政映射</Text>
+              </div>
+            </Card>
+          </Col>
+          <Col xs={24} sm={12} lg={6}>
+            <Card bordered={false} hoverable>
+              <Statistic
+                title="思政元素挖掘数"
+                value={toStatisticValue(stats.ideologyCount)}
+                valueStyle={{ color: 'var(--color-text-primary)', fontWeight: 'bold' }}
+                prefix={<RobotOutlined style={{ color: 'var(--color-error)', marginRight: 8 }} />}
+              />
+              <div style={{ marginTop: 8, fontSize: 13 }}>
+                <Text type="success"><RiseOutlined /> </Text>
+                <Text type="secondary" style={{ marginLeft: 4 }}>已关联知识点</Text>
+              </div>
+            </Card>
+          </Col>
+          <Col xs={24} sm={12} lg={6}>
+            <Card bordered={false} hoverable>
+              <Statistic
+                title="学生互动活跃度"
+                value={toStatisticValue(stats.studentActivity)}
+                valueStyle={{ color: 'var(--color-text-primary)', fontWeight: 'bold' }}
+                prefix={<InfoCircleOutlined style={{ color: '#8b5cf6', marginRight: 8 }} />}
+              />
+              <div style={{ marginTop: 8, fontSize: 13 }}>
+                <Text type="success"><RiseOutlined /> </Text>
+                <Text type="secondary" style={{ marginLeft: 4 }}>学习行为记录</Text>
+              </div>
+            </Card>
+          </Col>
+          <Col xs={24} sm={12} lg={6}>
+            <Card 
+              bordered={false} 
+              hoverable 
+              onClick={() => onChangeView(View.KNOWLEDGE_GRAPH)}
+              style={{ cursor: 'pointer', border: '1px solid transparent' }}
             >
-              <div className="flex justify-between items-start mb-4">
+              <Statistic
+                title="待处理预警"
+                value={toStatisticValue(stats.alertCount, 0)}
+                valueStyle={{ color: 'var(--color-text-primary)', fontWeight: 'bold' }}
+                prefix={<WarningOutlined style={{ color: '#f59e0b', marginRight: 8 }} />}
+              />
+              <div style={{ marginTop: 8, fontSize: 13, display: 'flex', justifyContent: 'space-between' }}>
                 <div>
-                  <p className="text-sm font-medium text-slate-500">{stat.label}</p>
-                  <h3 className="text-3xl font-display font-bold text-slate-900 mt-1">{stat.value}</h3>
+                  <Text type="warning">需关注 </Text>
+                  <Text type="secondary" style={{ marginLeft: 4 }}>课程内容审核</Text>
                 </div>
-                <div className={`p-2 bg-${stat.color}-50 rounded-lg text-${stat.color === 'blue' ? 'primary' : stat.color + '-500'}`}>
-                  <span className="material-symbols-outlined">{stat.icon}</span>
-                </div>
+                <ExportOutlined style={{ color: 'var(--color-text-tertiary)' }} />
               </div>
-              <div className="flex items-center gap-2 text-sm">
-                <span className={`${stat.trend === 'neutral' ? 'text-orange-500' : 'text-emerald-600'} font-medium flex items-center`}>
-                  {stat.trend === 'up' && <span className="material-symbols-outlined text-[16px]">trending_up</span>}
-                  {stat.change}
-                </span>
-                <span className="text-slate-400">{stat.sub}</span>
-              </div>
-              {stat.onClick && (
-                <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <span className="material-symbols-outlined text-slate-300 text-sm">open_in_new</span>
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
+            </Card>
+          </Col>
+        </Row>
 
         {/* 趋势图 + 动态 */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* 折线图 */}
-          <div className="lg:col-span-2 bg-white rounded-xl border border-slate-100 shadow-sm p-6 flex flex-col">
-            <div className="flex justify-between items-center mb-6">
-              <div>
-                <h3 className="font-display font-bold text-lg text-slate-900">思政融入趋势分析</h3>
-                <p className="text-sm text-slate-500">已融入思政元素的知识点百分比变化</p>
+        <Row gutter={[24, 24]}>
+          <Col xs={24} lg={16}>
+            <Card 
+              title="思政融入趋势分析" 
+              bordered={false} 
+              bodyStyle={{ padding: 24 }}
+              style={{ height: '100%' }}
+              extra={<Text type="secondary">已融入思政元素的知识点百分比变化</Text>}
+            >
+              <div style={{ minHeight: 300, width: '100%' }}>
+                {trendData.length > 0 ? (
+                  <svg viewBox={`0 0 ${chartWidth} ${chartHeight}`} style={{ width: '100%', height: '100%' }}>
+                    {[0, 25, 50, 75, 100].map(tick => {
+                      const y = chartPadding.top + innerHeight - (tick / 100) * innerHeight;
+                      return (
+                        <g key={tick}>
+                          <line
+                            x1={chartPadding.left} y1={y}
+                            x2={chartWidth - chartPadding.right} y2={y}
+                            stroke="#F1F5F9" strokeWidth={1}
+                          />
+                          <text x={chartPadding.left - 8} y={y + 4} textAnchor="end" fill="#94A3B8" fontSize={11}>
+                            {tick}%
+                          </text>
+                        </g>
+                      );
+                    })}
+                    <defs>
+                      <linearGradient id="areaGradient" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="var(--color-primary)" stopOpacity="0.15" />
+                        <stop offset="100%" stopColor="var(--color-primary)" stopOpacity="0" />
+                      </linearGradient>
+                    </defs>
+                    <path d={areaPath} fill="url(#areaGradient)" />
+                    <path
+                      d={linePath}
+                      fill="none"
+                      stroke="var(--color-primary)"
+                      strokeWidth={2.5}
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                    {trendData.map((item, i) => {
+                      const { x, y } = getPoint(i, item.value);
+                      return (
+                        <g key={i}>
+                          <circle cx={x} cy={y} r={4} fill="var(--color-primary)" stroke="white" strokeWidth={2} />
+                          <text
+                            x={x} y={chartHeight - 10}
+                            textAnchor="middle" fill="#94A3B8" fontSize={11}
+                          >
+                            {item.week}
+                          </text>
+                          <text x={x} y={y - 12} textAnchor="middle" fill="var(--color-primary)" fontSize={11} fontWeight="600">
+                            {item.value}%
+                          </text>
+                        </g>
+                      );
+                    })}
+                  </svg>
+                ) : (
+                  <Empty description="暂无趋势数据" style={{ marginTop: 60 }} />
+                )}
               </div>
-            </div>
-            <div className="flex-1 min-h-[300px] w-full">
-              {trendData.length > 0 ? (
-                <svg viewBox={`0 0 ${chartWidth} ${chartHeight}`} className="w-full h-full">
-                  {/* Y轴刻度线 + 标签 */}
-                  {[0, 25, 50, 75, 100].map(tick => {
-                    const y = chartPadding.top + innerHeight - (tick / 100) * innerHeight;
+            </Card>
+          </Col>
+          <Col xs={24} lg={8}>
+            <Card title="最新动态" bordered={false} bodyStyle={{ padding: '0 24px', height: 350, overflowY: 'auto' }}>
+              {activities.length > 0 ? (
+                <List<ActivityInfo>
+                  itemLayout="horizontal"
+                  dataSource={activities}
+                  renderItem={item => {
+                    const style = getActivityStyle(item.type);
                     return (
-                      <g key={tick}>
-                        <line
-                          x1={chartPadding.left} y1={y}
-                          x2={chartWidth - chartPadding.right} y2={y}
-                          stroke="#F1F5F9" strokeWidth={1}
+                      <List.Item>
+                        <List.Item.Meta
+                          avatar={<Avatar icon={style.icon} style={{ backgroundColor: style.bg, color: style.color }} />}
+                          title={<Text strong style={{ fontSize: 13 }}>{item.title}</Text>}
+                          description={
+                            <Space direction="vertical" size={2}>
+                              <Text type="secondary" style={{ fontSize: 12 }}>{item.description}</Text>
+                              <Text type="secondary" style={{ fontSize: 11 }}>{item.createdAt}</Text>
+                            </Space>
+                          }
                         />
-                        <text x={chartPadding.left - 8} y={y + 4} textAnchor="end" fill="#94A3B8" fontSize={11}>
-                          {tick}%
-                        </text>
-                      </g>
+                      </List.Item>
                     );
-                  })}
-
-                  {/* 渐变填充区域 */}
-                  <defs>
-                    <linearGradient id="areaGradient" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="#3B82F6" stopOpacity="0.15" />
-                      <stop offset="100%" stopColor="#3B82F6" stopOpacity="0" />
-                    </linearGradient>
-                  </defs>
-                  <path d={areaPath} fill="url(#areaGradient)" />
-
-                  {/* 折线 */}
-                  <path
-                    d={linePath}
-                    fill="none"
-                    stroke="#3B82F6"
-                    strokeWidth={2.5}
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-
-                  {/* 数据点 + X轴标签 */}
-                  {trendData.map((item, i) => {
-                    const { x, y } = getPoint(i, item.value);
-                    return (
-                      <g key={i}>
-                        <circle cx={x} cy={y} r={4} fill="#3B82F6" stroke="white" strokeWidth={2} />
-                        <text
-                          x={x} y={chartHeight - 10}
-                          textAnchor="middle" fill="#94A3B8" fontSize={11}
-                        >
-                          {item.week}
-                        </text>
-                        {/* 悬浮数值 */}
-                        <text x={x} y={y - 12} textAnchor="middle" fill="#3B82F6" fontSize={11} fontWeight="600">
-                          {item.value}%
-                        </text>
-                      </g>
-                    );
-                  })}
-                </svg>
+                  }}
+                />
               ) : (
-                <div className="flex items-center justify-center w-full h-full text-slate-300">
-                  <p className="text-sm">暂无趋势数据</p>
-                </div>
+                <Empty description="暂无动态" style={{ marginTop: 80 }} />
               )}
-            </div>
-          </div>
-
-          {/* 动态列表 */}
-          <div className="bg-white rounded-xl border border-slate-100 shadow-sm p-6 flex flex-col h-full">
-            <div className="flex justify-between items-center mb-6">
-              <h3 className="font-display font-bold text-lg text-slate-900">最新动态</h3>
-            </div>
-            <div className="flex flex-col gap-4 flex-1 overflow-y-auto pr-1">
-              {activities.length > 0 ? activities.map((item) => {
-                const style = getActivityStyle(item.type);
-                return (
-                  <div key={item.id} className="flex gap-3 items-start pb-4 border-b border-slate-50 last:border-0">
-                    <div className={`w-8 h-8 rounded-full bg-${style.bg} flex items-center justify-center text-${style.color} flex-shrink-0`}>
-                      <span className="material-symbols-outlined text-[16px]">{style.icon}</span>
-                    </div>
-                    <div>
-                      <p className="text-sm text-slate-800 font-medium">{item.title}</p>
-                      <p className="text-xs text-slate-500 mt-0.5">{item.description}</p>
-                      <p className="text-[10px] text-slate-400 mt-2">{item.createdAt}</p>
-                    </div>
-                  </div>
-                );
-              }) : (
-                <div className="flex-1 flex items-center justify-center text-slate-300">
-                  <p className="text-sm">暂无动态</p>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
+            </Card>
+          </Col>
+        </Row>
 
         {/* 课程列表 */}
-        <div className="bg-white rounded-xl border border-slate-100 shadow-sm p-6 mb-8">
-          <div className="flex justify-between items-center mb-6">
-            <h3 className="font-display font-bold text-lg text-slate-900">我的课程</h3>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse">
-              <thead>
-                <tr className="text-xs text-slate-400 border-b border-slate-100">
-                  <th className="py-3 px-2 font-medium">课程名称</th>
-                  <th className="py-3 px-2 font-medium">进度</th>
-                  <th className="py-3 px-2 font-medium">思政融合度</th>
-                  <th className="py-3 px-2 font-medium text-right">操作</th>
-                </tr>
-              </thead>
-              <tbody className="text-sm">
-                {courses.length > 0 ? courses.map((course) => (
-                  <tr key={course.id} className="border-b border-slate-50 hover:bg-slate-50 transition-colors">
-                    <td className="py-3 px-2 font-medium text-slate-800">
-                      <div className="flex items-center gap-3">
-                        <div className={`w-8 h-8 rounded bg-${course.gradeColor}-100 flex items-center justify-center text-${course.gradeColor}-600 font-bold text-xs`}>
-                          {course.name?.charAt(0) || '课'}
-                        </div>
-                        {course.name}
-                      </div>
-                    </td>
-                    <td className="py-3 px-2 text-slate-500">
-                      <div className="flex items-center gap-2">
-                        <div className="w-16 h-1.5 bg-slate-100 rounded-full overflow-hidden">
-                          <div className="h-full bg-primary" style={{ width: `${course.progress}%` }}></div>
-                        </div>
-                        <span className="text-xs">{course.progress}%</span>
-                      </div>
-                    </td>
-                    <td className="py-3 px-2">
-                      <span className={`px-2 py-1 rounded bg-${course.gradeColor}-100 text-${course.gradeColor}-700 text-xs font-medium`}>
-                        {course.gradeLabel}
-                      </span>
-                    </td>
-                    <td className="py-3 px-2 text-right">
-                      <button className="text-slate-400 hover:text-primary transition-colors">
-                        <span className="material-symbols-outlined text-[18px]">edit</span>
-                      </button>
-                    </td>
-                  </tr>
-                )) : (
-                  <tr>
-                    <td colSpan={4} className="py-12 text-center text-slate-400">暂无课程数据</td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
+        <Card title="我的课程" bordered={false} bodyStyle={{ padding: 0 }}>
+          <Table 
+            columns={columns} 
+            dataSource={courses} 
+            rowKey="id" 
+            pagination={false} 
+            locale={{ emptyText: <Empty description="暂无课程数据" style={{ padding: '32px 0' }} /> }}
+          />
+        </Card>
+
       </div>
     </div>
   );

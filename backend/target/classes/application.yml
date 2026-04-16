@@ -1,102 +1,101 @@
-# 智教思政后端服务配置文件
-# 服务器配置
+﻿# 智教思政后端服务配置文件
 server:
   port: 8080
   servlet:
     context-path: /
 
-# Spring 配置
 spring:
   application:
     name: smart-education-backend
-
-  # 数据库配置
   datasource:
     driver-class-name: com.mysql.cj.jdbc.Driver
-    # NOTE: 请根据实际情况修改数据库连接信息
     url: jdbc:mysql://localhost:3306/smart_education?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
     username: root
     password: root
-
-  # 文件上传配置
   servlet:
     multipart:
       max-file-size: 50MB
       max-request-size: 50MB
-
-  # Jackson 日期格式配置
   jackson:
     date-format: yyyy-MM-dd HH:mm:ss
     time-zone: Asia/Shanghai
 
-# MyBatis-Plus 配置
 mybatis-plus:
   mapper-locations: classpath:mapper/*.xml
   type-aliases-package: com.smartedu.entity
   configuration:
-    # 开启驼峰命名转换
     map-underscore-to-camel-case: true
-    # 控制台打印 SQL（生产环境建议关闭）
     log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
   global-config:
     db-config:
-      # 主键自增策略
       id-type: auto
-      # 逻辑删除配置
       logic-delete-field: deleted
       logic-delete-value: 1
       logic-not-delete-value: 0
 
-# JWT 配置
 jwt:
-  # NOTE: 生产环境请使用更复杂的密钥
   secret: SmartEducationSecretKey2024VeryLongSecretKeyForJwtSigning
-  # 令牌有效期（单位：秒，默认 24 小时）
   expiration: 86400
 
 # AI 服务配置
 ai:
-  # DeepSeek API 配置
+  # 对话默认入口，前端“默认”按钮将命中该配置
+  proxy:
+    enabled: true
+    label: ${AI_PROXY_LABEL:default-proxy}
+    api-key: ${AI_PROXY_API_KEY:codex_fdc40f2667d778e09fc46906389afa1d031c4ce07d8a3ca8}
+    base-url: ${AI_PROXY_API_BASE:https://codex.miaomiaocode.com/v1}
+    model: ${AI_PROXY_MODEL:gpt-5-codex-mini}
+    timeout: 120
+
+  # 后台任务自动回退顺序与熔断阈值
+  routing:
+    default-chat-provider: ${AI_DEFAULT_CHAT_PROVIDER:proxy}
+    background-providers: ${AI_BACKGROUND_PROVIDERS:proxy,deepseek,openai}
+    failure-threshold: ${AI_FAILURE_THRESHOLD:3}
+
+  pipeline:
+    max-input-chars: ${AI_PIPELINE_MAX_INPUT_CHARS:5000}
+    max-knowledge-points: ${AI_PIPELINE_MAX_KNOWLEDGE_POINTS:12}
+    max-ideology-matches-per-point: ${AI_PIPELINE_MAX_IDEOLOGY_MATCHES_PER_POINT:3}
+    max-questions: ${AI_PIPELINE_MAX_QUESTIONS:6}
+    schema-version: ${AI_PIPELINE_SCHEMA_VERSION:v1}
+    regenerate-retry: ${AI_PIPELINE_REGENERATE_RETRY:1}
+
+  # 原有 DeepSeek 配置保留，可作为后台自动回退节点
   deepseek:
-    # NOTE: 请在此填入您的 API Key
+    enabled: ${DEEPSEEK_ENABLED:true}
     api-key: ${DEEPSEEK_API_KEY:your-deepseek-api-key}
-    base-url: https://api.deepseek.com/v1
-    model: deepseek-chat
-    # 请求超时时间（秒）
+    base-url: ${DEEPSEEK_API_BASE:https://api.deepseek.com/v1}
+    model: ${DEEPSEEK_MODEL:deepseek-chat}
     timeout: 120
 
-  # 预留其他 AI 提供商配置
-  gemini:
-    api-key: ${GEMINI_API_KEY:your-gemini-api-key}
-    base-url: https://generativelanguage.googleapis.com/v1beta
-
-  # OpenAI 兼容 API 配置（用于统一接入）
+  # 原有 OpenAI 兼容配置保留，默认关闭，按需开启
   openai:
-    provider: ${OPENAI_PROVIDER:openai}
-    api-key: ${OPENAI_API_KEY:codex666}
-    base-url: ${OPENAI_API_BASE:https://load.frp.helpus.dpdns.org:18080/proxy/codex/v1}
-    model: ${OPENAI_MODEL:gpt-5.3-codex}
+    enabled: ${OPENAI_ENABLED:false}
+    label: ${OPENAI_LABEL:openai}
+    api-key: ${OPENAI_API_KEY:}
+    base-url: ${OPENAI_API_BASE:https://api.openai.com/v1}
+    model: ${OPENAI_MODEL:gpt-4o-mini}
     timeout: 120
 
-  # 当前使用的 AI 提供商
-  provider: ${AI_PROVIDER:openai}
+  # Gemini 仍为预留配置，当前默认关闭
+  gemini:
+    enabled: ${GEMINI_ENABLED:false}
+    api-key: ${GEMINI_API_KEY:}
+    base-url: ${GEMINI_API_BASE:https://generativelanguage.googleapis.com/v1beta}
+    model: ${GEMINI_MODEL:}
+    timeout: 120
 
-# MinerU 文档解析服务配置
 mineru:
-  # NOTE: 请在此填入您的 API Key
   api-key: ${MINERU_API_KEY:your-mineru-api-key}
-  base-url: https://api.mineru.ai/v1
-  # 请求超时时间（秒）
+  base-url: ${MINERU_API_BASE:https://api.mineru.ai/v1}
   timeout: 300
 
-# 文件存储配置
 storage:
-  # 上传文件存储路径
   upload-path: ./uploads
-  # 允许的文件类型
   allowed-types: pdf,doc,docx,ppt,pptx,xls,xlsx
 
-# 日志配置
 logging:
   level:
     root: INFO

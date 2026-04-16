@@ -2,22 +2,22 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { View } from '../types';
 import { dashboardApi, knowledgeApi, pathApi, LearningPathResult, ActivityInfo } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
+import { 
+  Typography, Card, Row, Col, Statistic, Button, 
+  List, Avatar, Spin, Space, Empty, Tooltip 
+} from 'antd';
+import { 
+  RobotOutlined, ShareAltOutlined, BookOutlined, BlockOutlined,
+  NodeIndexOutlined, NotificationOutlined, SyncOutlined, ArrowRightOutlined,
+  CloudUploadOutlined, InfoCircleOutlined, CompassOutlined
+} from '@ant-design/icons';
+
+const { Title, Text, Paragraph } = Typography;
 
 interface StudentHomeProps {
-  /** 切换视图的回调（供跳转到知识图谱时使用） */
   onChangeView: (view: View, options?: { highlightNodeIds?: number[] }) => void;
 }
 
-/**
- * 学生端专属首页
- *
- * <p>
- * 与教师 Dashboard 完全独立设计，面向学生的学习场景：
- * - 学习统计概览（简洁数字卡片）
- * - 个性化学习路径推荐（基于知识图谱 DAG 推荐服务）
- * - 近期系统动态快览
- * - 快捷功能入口
- */
 export const StudentHome: React.FC<StudentHomeProps> = ({ onChangeView }) => {
   const { currentUser } = useAuth();
   const [totalNodes, setTotalNodes] = useState<number>(0);
@@ -26,7 +26,6 @@ export const StudentHome: React.FC<StudentHomeProps> = ({ onChangeView }) => {
   const [loadingPath, setLoadingPath] = useState(false);
   const [loading, setLoading] = useState(true);
 
-  /** 加载基础统计数据 */
   const loadStats = useCallback(async () => {
     try {
       const [graphData, acts] = await Promise.all([
@@ -42,7 +41,6 @@ export const StudentHome: React.FC<StudentHomeProps> = ({ onChangeView }) => {
     }
   }, []);
 
-  /** 加载个性化学习路径推荐 */
   const loadPathRecommendation = useCallback(async () => {
     if (!currentUser?.id) return;
     setLoadingPath(true);
@@ -50,7 +48,7 @@ export const StudentHome: React.FC<StudentHomeProps> = ({ onChangeView }) => {
       const result = await pathApi.getRecommendedPath(currentUser.id, [], [], 6);
       setRecommendedPath(result);
     } catch {
-      // NOTE: 推荐失败时静默处理，不阻断页面渲染
+      // NOTE: 推荐失败时静默处理
     } finally {
       setLoadingPath(false);
     }
@@ -61,7 +59,6 @@ export const StudentHome: React.FC<StudentHomeProps> = ({ onChangeView }) => {
     loadPathRecommendation();
   }, [loadStats, loadPathRecommendation]);
 
-  /** 跳转到知识图谱并高亮推荐路径 */
   const handleViewPath = () => {
     if (recommendedPath?.nodeIds && recommendedPath.nodeIds.length > 0) {
       onChangeView(View.KNOWLEDGE_GRAPH, { highlightNodeIds: recommendedPath.nodeIds });
@@ -72,11 +69,11 @@ export const StudentHome: React.FC<StudentHomeProps> = ({ onChangeView }) => {
 
   if (loading) {
     return (
-      <div className="flex-1 flex items-center justify-center bg-background-light">
-        <div className="flex flex-col items-center gap-4">
-          <div className="size-10 border-4 border-primary/20 border-t-primary rounded-full animate-spin"></div>
-          <p className="text-sm text-slate-400">加载学习空间...</p>
-        </div>
+      <div style={{ display: 'flex', flex: 1, alignItems: 'center', justifyContent: 'center', height: '100%' }}>
+        <Space direction="vertical" align="center">
+          <Spin size="large" />
+          <Text type="secondary">加载学习空间...</Text>
+        </Space>
       </div>
     );
   }
@@ -90,208 +87,199 @@ export const StudentHome: React.FC<StudentHomeProps> = ({ onChangeView }) => {
 
   const displayName = currentUser?.realName || currentUser?.username || '同学';
 
+  const getActivityIcon = (type: string) => {
+    switch(type) {
+      case 'UPLOAD': return <CloudUploadOutlined />;
+      case 'AI_ANALYSIS': return <RobotOutlined />;
+      case 'GRAPH_UPDATE': return <BlockOutlined />;
+      default: return <InfoCircleOutlined />;
+    }
+  };
+
   return (
-    <div className="flex-1 overflow-y-auto bg-background-light">
-      <div className="max-w-5xl mx-auto px-8 py-8 space-y-8">
+    <div style={{ flex: 1, overflowY: 'auto', padding: '32px' }}>
+      <div style={{ maxWidth: 1100, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '24px' }}>
 
         {/* 欢迎横幅 */}
-        <div className="relative rounded-2xl overflow-hidden bg-gradient-to-br from-blue-600 via-blue-700 to-purple-700 p-8 text-white shadow-lg">
-          {/* 背景装饰圆 */}
-          <div className="absolute -top-8 -right-8 size-40 rounded-full bg-white/5"></div>
-          <div className="absolute -bottom-4 -right-16 size-32 rounded-full bg-white/5"></div>
-
-          <div className="relative z-10">
-            <p className="text-blue-200 text-sm font-medium mb-1">{greeting}！</p>
-            <h1 className="text-2xl font-display font-bold mb-2">欢迎回来，{displayName}</h1>
-            <p className="text-blue-200 text-sm max-w-md">
+        <div style={{ 
+          background: 'linear-gradient(135deg, var(--color-primary) 0%, #722ed1 100%)', 
+          borderRadius: 20, padding: 32, color: '#fff', position: 'relative', overflow: 'hidden' 
+        }}>
+          <div style={{ position: 'absolute', top: -32, right: -32, width: 160, height: 160, borderRadius: '50%', background: 'rgba(255,255,255,0.05)' }} />
+          <div style={{ position: 'absolute', bottom: -16, right: -64, width: 128, height: 128, borderRadius: '50%', background: 'rgba(255,255,255,0.05)' }} />
+          
+          <div style={{ position: 'relative', zIndex: 10 }}>
+            <Text style={{ color: 'rgba(255,255,255,0.85)', fontSize: 14 }}>{greeting}！</Text>
+            <Title level={2} style={{ color: '#fff', margin: '4px 0 8px', fontFamily: "'Lexend', sans-serif" }}>
+              欢迎回来，{displayName}
+            </Title>
+            <Paragraph style={{ color: 'rgba(255,255,255,0.85)', maxWidth: 480, fontSize: 14, marginBottom: 0 }}>
               智教思政平台已为您准备了今日的学习路径和思政内容，继续探索吧 🚀
-            </p>
+            </Paragraph>
           </div>
 
-          {/* 快捷按钮 */}
-          <div className="relative z-10 flex gap-3 mt-6">
-            <button
-              onClick={() => onChangeView(View.AI_ASSISTANT)}
-              className="flex items-center gap-2 px-4 py-2 bg-white/20 hover:bg-white/30 rounded-lg text-sm font-medium transition-all backdrop-blur-sm"
-            >
-              <span className="material-symbols-outlined text-[16px]">smart_toy</span>
+          <Space size={12} style={{ position: 'relative', zIndex: 10, marginTop: 24 }}>
+            <Button type="primary" ghost icon={<RobotOutlined />} onClick={() => onChangeView(View.AI_ASSISTANT)} style={{ color: '#fff', borderColor: 'rgba(255,255,255,0.4)', background: 'rgba(255,255,255,0.15)' }}>
               AI 助教
-            </button>
-            <button
-              onClick={() => onChangeView(View.KNOWLEDGE_GRAPH)}
-              className="flex items-center gap-2 px-4 py-2 bg-white/20 hover:bg-white/30 rounded-lg text-sm font-medium transition-all backdrop-blur-sm"
-            >
-              <span className="material-symbols-outlined text-[16px]">hub</span>
+            </Button>
+            <Button type="primary" ghost icon={<ShareAltOutlined />} onClick={() => onChangeView(View.KNOWLEDGE_GRAPH)} style={{ color: '#fff', borderColor: 'rgba(255,255,255,0.4)', background: 'rgba(255,255,255,0.15)' }}>
               知识图谱
-            </button>
-            <button
-              onClick={() => onChangeView(View.COURSE_LIBRARY)}
-              className="flex items-center gap-2 px-4 py-2 bg-white/20 hover:bg-white/30 rounded-lg text-sm font-medium transition-all backdrop-blur-sm"
-            >
-              <span className="material-symbols-outlined text-[16px]">menu_book</span>
+            </Button>
+            <Button type="primary" ghost icon={<BookOutlined />} onClick={() => onChangeView(View.COURSE_LIBRARY)} style={{ color: '#fff', borderColor: 'rgba(255,255,255,0.4)', background: 'rgba(255,255,255,0.15)' }}>
               课程资源
-            </button>
-          </div>
+            </Button>
+          </Space>
         </div>
 
         {/* 统计数字卡片 */}
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-          {[
-            {
-              label: '知识图谱节点',
-              value: totalNodes,
-              suffix: '个',
-              icon: 'hub',
-              color: 'blue',
-              sub: '可供探索的知识点',
-            },
-            {
-              label: '已推荐路径节点',
-              value: recommendedPath?.nodeIds?.length ?? 0,
-              suffix: '个',
-              icon: 'route',
-              color: 'purple',
-              sub: '个性化学习推荐',
-            },
-            {
-              label: '近期系统动态',
-              value: activities.length,
-              suffix: '条',
-              icon: 'notifications',
-              color: 'amber',
-              sub: '资源与图谱更新',
-            },
-          ].map((card) => (
-            <div key={card.label} className="bg-white rounded-xl border border-slate-100 shadow-sm p-5">
-              <div className="flex justify-between items-start">
+        <Row gutter={[24, 24]}>
+          <Col xs={24} md={8}>
+            <Card bordered={false} bodyStyle={{ padding: 20 }}>
+              <Statistic
+                title={<Text type="secondary" style={{ fontSize: 13, fontWeight: 500 }}>知识图谱节点</Text>}
+                value={totalNodes}
+                suffix="个"
+                prefix={<BlockOutlined style={{ color: 'var(--color-primary)', marginRight: 8 }} />}
+                valueStyle={{ fontFamily: "'Lexend', sans-serif", fontWeight: 'bold' }}
+              />
+              <Text type="secondary" style={{ fontSize: 12, marginTop: 8, display: 'block' }}>可供探索的知识点</Text>
+            </Card>
+          </Col>
+          <Col xs={24} md={8}>
+            <Card bordered={false} bodyStyle={{ padding: 20 }}>
+              <Statistic
+                title={<Text type="secondary" style={{ fontSize: 13, fontWeight: 500 }}>已推荐路径节点</Text>}
+                value={recommendedPath?.nodeIds?.length ?? 0}
+                suffix="个"
+                prefix={<NodeIndexOutlined style={{ color: '#722ed1', marginRight: 8 }} />}
+                valueStyle={{ fontFamily: "'Lexend', sans-serif", fontWeight: 'bold' }}
+              />
+              <Text type="secondary" style={{ fontSize: 12, marginTop: 8, display: 'block' }}>个性化学习推荐</Text>
+            </Card>
+          </Col>
+          <Col xs={24} md={8}>
+            <Card bordered={false} bodyStyle={{ padding: 20 }}>
+              <Statistic
+                title={<Text type="secondary" style={{ fontSize: 13, fontWeight: 500 }}>近期系统动态</Text>}
+                value={activities.length}
+                suffix="条"
+                prefix={<NotificationOutlined style={{ color: '#faad14', marginRight: 8 }} />}
+                valueStyle={{ fontFamily: "'Lexend', sans-serif", fontWeight: 'bold' }}
+              />
+              <Text type="secondary" style={{ fontSize: 12, marginTop: 8, display: 'block' }}>资源与图谱更新</Text>
+            </Card>
+          </Col>
+        </Row>
+
+        <Row gutter={[24, 24]}>
+          {/* 个性化学习路径推荐 */}
+          <Col xs={24} lg={14}>
+            <Card 
+              bordered={false} 
+              style={{ height: '100%' }}
+              title={
                 <div>
-                  <p className="text-xs text-slate-500 font-medium">{card.label}</p>
-                  <div className="flex items-end gap-1 mt-1.5">
-                    <span className="text-3xl font-display font-bold text-slate-900">{card.value}</span>
-                    <span className="text-sm text-slate-400 mb-0.5">{card.suffix}</span>
-                  </div>
+                  <Title level={5} style={{ margin: 0, fontFamily: "'Lexend', sans-serif" }}>个性化学习路径推荐</Title>
+                  <Text type="secondary" style={{ fontSize: 12, fontWeight: 'normal' }}>基于知识图谱 DAG 结构智能生成</Text>
                 </div>
-                <div className={`p-2 bg-${card.color}-50 rounded-lg`}>
-                  <span className={`material-symbols-outlined text-${card.color}-500`}>{card.icon}</span>
+              }
+              extra={
+                <Tooltip title="重新生成推荐路径">
+                  <Button type="text" icon={<SyncOutlined spin={loadingPath} />} onClick={loadPathRecommendation} disabled={loadingPath} />
+                </Tooltip>
+              }
+            >
+              {loadingPath ? (
+                <div style={{ padding: '48px 0', textAlign: 'center' }}>
+                  <Space direction="vertical" align="center" size={8}>
+                    <Spin />
+                    <Text type="secondary">正在生成推荐路径...</Text>
+                  </Space>
                 </div>
-              </div>
-              <p className="text-xs text-slate-400 mt-2">{card.sub}</p>
-            </div>
-          ))}
-        </div>
-
-        {/* 主内容区：推荐路径 + 近期动态 */}
-        <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
-
-          {/* 个性化学习路径推荐（占 3 份） */}
-          <div className="lg:col-span-3 bg-white rounded-xl border border-slate-100 shadow-sm p-6">
-            <div className="flex justify-between items-center mb-5">
-              <div>
-                <h2 className="font-display font-bold text-slate-900 text-base">
-                  个性化学习路径推荐
-                </h2>
-                <p className="text-xs text-slate-400 mt-0.5">基于知识图谱 DAG 结构智能生成</p>
-              </div>
-              <button
-                onClick={loadPathRecommendation}
-                disabled={loadingPath}
-                className="p-1.5 rounded-lg hover:bg-slate-100 transition-colors disabled:opacity-50"
-                title="重新生成推荐路径"
-              >
-                <span className={`material-symbols-outlined text-slate-400 text-[18px] ${loadingPath ? 'animate-spin' : ''}`}>
-                  refresh
-                </span>
-              </button>
-            </div>
-
-            {loadingPath ? (
-              <div className="flex items-center justify-center py-8">
-                <div className="size-6 border-2 border-primary/20 border-t-primary rounded-full animate-spin"></div>
-                <span className="text-sm text-slate-400 ml-3">正在生成推荐路径...</span>
-              </div>
-            ) : recommendedPath && recommendedPath.nodeNames.length > 0 ? (
-              <>
-                {/* 路径节点列表 */}
-                <div className="space-y-2 mb-5">
-                  {recommendedPath.nodeNames.map((name, idx) => (
-                    <div
-                      key={recommendedPath.nodeIds[idx] ?? idx}
-                      className="flex items-center gap-3 p-3 rounded-lg bg-slate-50 hover:bg-blue-50 transition-colors group"
-                    >
-                      {/* 序号圆圈 */}
-                      <div className="size-7 rounded-full bg-primary/10 text-primary text-xs font-bold flex items-center justify-center shrink-0 group-hover:bg-primary group-hover:text-white transition-colors">
-                        {idx + 1}
-                      </div>
-                      <span className="text-sm text-slate-700 font-medium">{name}</span>
-                      {idx < recommendedPath.nodeNames.length - 1 && (
-                        <span className="material-symbols-outlined text-slate-300 text-[14px] ml-auto">arrow_forward</span>
-                      )}
-                    </div>
-                  ))}
+              ) : recommendedPath && recommendedPath.nodeNames.length > 0 ? (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                  <List<string>
+                    dataSource={recommendedPath.nodeNames}
+                    renderItem={(name, idx) => (
+                      <List.Item style={{ padding: '12px 16px', background: 'var(--color-bg-muted)', borderRadius: 12, marginBottom: 8, border: 'none' }}>
+                        <List.Item.Meta
+                          avatar={
+                            <Avatar size={28} style={{ backgroundColor: 'var(--color-primary-soft)', color: 'var(--color-primary)', fontWeight: 'bold', fontSize: 13 }}>
+                              {idx + 1}
+                            </Avatar>
+                          }
+                          title={<Text strong style={{ fontSize: 14 }}>{name}</Text>}
+                        />
+                        {idx < recommendedPath.nodeNames.length - 1 && (
+                          <ArrowRightOutlined style={{ color: '#cbd5e1' }} />
+                        )}
+                      </List.Item>
+                    )}
+                  />
+                  <Button type="primary" size="large" icon={<CompassOutlined />} onClick={handleViewPath} block style={{ borderRadius: 12 }}>
+                    在知识图谱中查看路径
+                  </Button>
                 </div>
-
-                {/* 跳转按钮 */}
-                <button
-                  onClick={handleViewPath}
-                  className="w-full flex items-center justify-center gap-2 py-3 bg-primary text-white rounded-xl text-sm font-medium hover:bg-blue-700 transition-colors shadow-sm"
+              ) : (
+                <Empty
+                  image={<CompassOutlined style={{ fontSize: 48, color: '#e2e8f0' }} />}
+                  description={
+                    <Space direction="vertical" size={2}>
+                      <Text strong style={{ color: 'var(--color-text-secondary)' }}>暂无推荐路径</Text>
+                      <Text type="secondary" style={{ fontSize: 12 }}>知识图谱中暂无可推荐的节点</Text>
+                    </Space>
+                  }
+                  style={{ padding: '48px 0' }}
                 >
-                  <span className="material-symbols-outlined text-[18px]">route</span>
-                  在知识图谱中查看路径
-                </button>
-              </>
-            ) : (
-              <div className="flex flex-col items-center justify-center py-8 text-center">
-                <span className="material-symbols-outlined text-slate-300 text-4xl mb-3">route</span>
-                <p className="text-sm text-slate-500 font-medium">暂无推荐路径</p>
-                <p className="text-xs text-slate-400 mt-1">知识图谱中暂无可推荐的节点</p>
-                <button
-                  onClick={() => onChangeView(View.KNOWLEDGE_GRAPH)}
-                  className="mt-4 px-4 py-2 bg-slate-100 text-slate-600 rounded-lg text-sm hover:bg-slate-200 transition-colors"
-                >
-                  前往知识图谱探索
-                </button>
-              </div>
-            )}
-          </div>
-
-          {/* 近期系统动态（占 2 份） */}
-          <div className="lg:col-span-2 bg-white rounded-xl border border-slate-100 shadow-sm p-6">
-            <h2 className="font-display font-bold text-slate-900 text-base mb-5">近期动态</h2>
-            <div className="space-y-4">
-              {activities.length > 0 ? activities.map((activity) => (
-                <div key={activity.id} className="flex gap-3">
-                  <div className="size-8 rounded-full bg-blue-100 flex items-center justify-center shrink-0">
-                    <span className="material-symbols-outlined text-primary text-[14px]">
-                      {activity.type === 'UPLOAD' ? 'upload_file' :
-                        activity.type === 'AI_ANALYSIS' ? 'smart_toy' :
-                          activity.type === 'GRAPH_UPDATE' ? 'hub' : 'info'}
-                    </span>
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm text-slate-800 font-medium truncate">{activity.title}</p>
-                    <p className="text-xs text-slate-400 mt-0.5 truncate">{activity.description}</p>
-                    <p className="text-[10px] text-slate-300 mt-1">{activity.createdAt}</p>
-                  </div>
-                </div>
-              )) : (
-                <div className="flex items-center justify-center py-6 text-slate-300">
-                  <p className="text-sm">暂无近期动态</p>
-                </div>
+                  <Button onClick={() => onChangeView(View.KNOWLEDGE_GRAPH)}>前往知识图谱探索</Button>
+                </Empty>
               )}
-            </div>
+            </Card>
+          </Col>
 
-            {/* 底部操作 */}
-            <div className="mt-5 pt-4 border-t border-slate-50">
-              <button
-                onClick={() => onChangeView(View.COURSE_LIBRARY)}
-                className="w-full flex items-center justify-center gap-2 py-2.5 border border-slate-200 rounded-xl text-sm text-slate-500 hover:bg-slate-50 hover:text-primary hover:border-primary/30 transition-all"
+          {/* 近期系统动态 */}
+          <Col xs={24} lg={10}>
+             <Card 
+               title="近期动态" 
+               bordered={false} 
+               style={{ height: '100%', display: 'flex', flexDirection: 'column' }}
+               bodyStyle={{ flex: 1, display: 'flex', flexDirection: 'column' }}
               >
-                <span className="material-symbols-outlined text-[16px]">menu_book</span>
-                浏览课程资源库
-              </button>
-            </div>
-          </div>
-        </div>
+              <div style={{ flex: 1 }}>
+                {activities.length > 0 ? (
+                  <List<ActivityInfo>
+                    itemLayout="horizontal"
+                    dataSource={activities}
+                    renderItem={activity => (
+                      <List.Item style={{ borderBottom: '1px solid var(--color-bg-muted)' }}>
+                        <List.Item.Meta
+                          avatar={
+                            <Avatar icon={getActivityIcon(activity.type)} style={{ backgroundColor: 'var(--color-primary-soft)', color: 'var(--color-primary)' }} />
+                          }
+                          title={<Text strong style={{ fontSize: 14 }}>{activity.title}</Text>}
+                          description={
+                            <Space direction="vertical" size={2}>
+                              <Text type="secondary" ellipsis style={{ fontSize: 12, maxWidth: 220 }}>{activity.description}</Text>
+                              <Text type="secondary" style={{ fontSize: 11, opacity: 0.8 }}>{activity.createdAt}</Text>
+                            </Space>
+                          }
+                        />
+                      </List.Item>
+                    )}
+                  />
+                ) : (
+                  <Empty description="暂无近期动态" style={{ padding: '48px 0' }} />
+                )}
+              </div>
+              <div style={{ marginTop: 16 }}>
+                <Button type="dashed" block icon={<BookOutlined />} onClick={() => onChangeView(View.COURSE_LIBRARY)} style={{ borderRadius: 12 }}>
+                  浏览课程资源库
+                </Button>
+              </div>
+            </Card>
+          </Col>
+        </Row>
+
       </div>
     </div>
   );

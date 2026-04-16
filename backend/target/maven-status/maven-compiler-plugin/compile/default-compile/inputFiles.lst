@@ -11,6 +11,7 @@ E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\controller\
 E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\controller\KnowledgeController.java
 E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\controller\PathRecommendController.java
 E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\controller\ResourceController.java
+E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\controller\TeachingMaterialController.java
 E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\controller\UploadController.java
 E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\controller\UserController.java
 E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\crawler\model\CrawledArticleProcessed.java
@@ -23,10 +24,21 @@ E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\crawler\rul
 E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\crawler\rule\impl\CpcPeopleCrawlRule.java
 E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\crawler\rule\impl\JhsjkPeopleCrawlRule.java
 E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\dto\AuthBootstrapResponse.java
+E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\dto\DocumentStructureDto.java
+E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\dto\IdeologyMatchDto.java
 E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\dto\KnowledgeContextItem.java
 E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\dto\KnowledgeNodeView.java
+E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\dto\KnowledgePointDto.java
+E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\dto\MaterialVersionItemDto.java
+E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\dto\PipelineResultDto.java
 E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\dto\RoleUiConfig.java
 E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\dto\SelectionExplainResponse.java
+E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\dto\TeachingArtifactsDto.java
+E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\dto\TeachingMaterialDraftDto.java
+E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\dto\TeachingMaterialSaveRequestDto.java
+E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\dto\TeachingMaterialTraceDto.java
+E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\dto\TeachingMaterialViewDto.java
+E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\dto\TeachingTraceItemDto.java
 E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\entity\ChatMessage.java
 E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\entity\ChatSession.java
 E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\entity\Course.java
@@ -43,6 +55,8 @@ E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\entity\Subj
 E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\entity\SubjectKnowledge.java
 E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\entity\SubjectKnowledgeSource.java
 E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\entity\SystemActivity.java
+E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\entity\TeachingMaterial.java
+E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\entity\TeachingMaterialTrace.java
 E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\entity\User.java
 E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\mapper\ChatMessageMapper.java
 E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\mapper\ChatSessionMapper.java
@@ -60,8 +74,11 @@ E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\mapper\Subj
 E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\mapper\SubjectKnowledgeMapper.java
 E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\mapper\SubjectKnowledgeSourceMapper.java
 E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\mapper\SystemActivityMapper.java
+E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\mapper\TeachingMaterialMapper.java
+E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\mapper\TeachingMaterialTraceMapper.java
 E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\mapper\UserMapper.java
 E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\service\AiIntelligenceService.java
+E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\service\AiPipelineJsonValidator.java
 E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\service\AlertService.java
 E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\service\AuthService.java
 E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\service\ChatService.java
@@ -76,5 +93,6 @@ E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\service\Pat
 E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\service\ResourceCrawlService.java
 E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\service\ResourceService.java
 E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\service\RoleAccessService.java
+E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\service\TeachingMaterialService.java
 E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\SmartEducationApplication.java
 E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\util\JwtUtil.java
