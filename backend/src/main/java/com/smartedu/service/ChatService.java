@@ -1,12 +1,22 @@
 package com.smartedu.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.smartedu.common.PageResult;
 import com.smartedu.dto.KnowledgeContextItem;
+import com.smartedu.dto.SelectionExplainEvidenceDto;
+import com.smartedu.dto.SelectionExplainHistoryDto;
+import com.smartedu.dto.SelectionExplainRequestDto;
 import com.smartedu.dto.SelectionExplainResponse;
 import com.smartedu.entity.ChatMessage;
 import com.smartedu.entity.ChatSession;
+import com.smartedu.entity.SelectionExplainRecord;
 import com.smartedu.mapper.ChatMessageMapper;
 import com.smartedu.mapper.ChatSessionMapper;
+import com.smartedu.mapper.SelectionExplainRecordMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -29,8 +39,10 @@ public class ChatService {
 
     private final ChatSessionMapper chatSessionMapper;
     private final ChatMessageMapper chatMessageMapper;
+    private final SelectionExplainRecordMapper selectionExplainRecordMapper;
     private final AiIntelligenceService aiIntelligenceService;
     private final KnowledgeRetrievalService knowledgeRetrievalService;
+    private final ObjectMapper objectMapper;
 
     /**
      * 获取用户会话列表。
@@ -161,15 +173,27 @@ public class ChatService {
     /**
      * 统一提供选中文本解释能力。
      */
-    public SelectionExplainResponse explainSelection(String selectionText) {
+    @Transactional
+    public SelectionExplainResponse explainSelection(SelectionExplainRequestDto request) {
+        String selectionText = safe(request.getText()).trim();
         List<KnowledgeContextItem> contexts = knowledgeRetrievalService.retrieveContext(selectionText, 4, 3);
+        List<SelectionExplainEvidenceDto> evidenceItems = contexts.stream()
+                .map(this::toEvidenceItem)
+                .collect(Collectors.toList());
+        boolean hasReliableEvidence = !evidenceItems.isEmpty();
+
         StringBuilder prompt = new StringBuilder();
-        prompt.append("Explain the following selected text, then describe its relationship to curriculum ideology:\n")
+        prompt.append("Explain the following selected text for a teacher preparing curriculum ideology materials.\n")
+                .append("Return the answer with two clear sections named Knowledge Evidence and Model Reasoning.\n")
+                .append("Knowledge Evidence must only use the provided knowledge-base context. ")
+                .append("Model Reasoning must explain the selected text based on those sources. ")
+                .append("If no knowledge-base context is provided, say that no reliable knowledge-base evidence was found.\n\n")
+                .append("Selected text:\n")
                 .append(selectionText)
                 .append("\n\n");
 
         if (!contexts.isEmpty()) {
-            prompt.append("Relevant knowledge-base context:\n");
+            prompt.append("Knowledge-base context:\n");
             for (KnowledgeContextItem context : contexts) {
                 prompt.append("- Title: ").append(safe(context.getTitle())).append("\n")
                         .append("  Summary: ").append(truncate(safe(context.getSummary()), 180)).append("\n")
@@ -186,8 +210,122 @@ public class ChatService {
 
         String answer = aiIntelligenceService.chat(
                 messages,
-                SYSTEM_PROMPT + " Use the knowledge-base context to explain the selected text, its ideological value, and any relevant sources.");
-        return new SelectionExplainResponse(answer, contexts);
+                SYSTEM_PROMPT + " Keep knowledge-base evidence separate from model reasoning. Never invent source links.");
+        String modelReasoning = extractModelReasoning(answer);
+
+        SelectionExplainRecord record = new SelectionExplainRecord();
+        record.setUserId(request.getUserId() == null ? 1L : request.getUserId());
+        record.setCourseId(request.getCourseId());
+        record.setMaterialId(request.getMaterialId());
+        record.setParseTaskId(request.getParseTaskId());
+        record.setSelectedText(selectionText);
+        record.setAnswer(answer);
+        record.setModelReasoning(modelReasoning);
+        record.setEvidenceJson(writeEvidenceJson(evidenceItems));
+        record.setHasReliableEvidence(hasReliableEvidence ? 1 : 0);
+        record.setCreatedAt(LocalDateTime.now());
+        selectionExplainRecordMapper.insert(record);
+
+        SelectionExplainResponse response = new SelectionExplainResponse();
+        response.setRecordId(record.getId());
+        response.setAnswer(answer);
+        response.setModelReasoning(modelReasoning);
+        response.setHasReliableEvidence(hasReliableEvidence);
+        response.setEvidenceItems(evidenceItems);
+        response.setContexts(contexts);
+        response.setCreatedAt(record.getCreatedAt());
+        return response;
+    }
+
+    public SelectionExplainResponse explainSelection(String selectionText) {
+        SelectionExplainRequestDto request = new SelectionExplainRequestDto();
+        request.setText(selectionText);
+        return explainSelection(request);
+    }
+
+    public PageResult<SelectionExplainHistoryDto> getSelectionExplainHistory(
+            Long userId,
+            Long materialId,
+            Long courseId,
+            int page,
+            int size) {
+        Page<SelectionExplainRecord> pageParam = new Page<>(Math.max(page, 1), Math.max(size, 1));
+        LambdaQueryWrapper<SelectionExplainRecord> wrapper = new LambdaQueryWrapper<>();
+        if (userId != null) {
+            wrapper.eq(SelectionExplainRecord::getUserId, userId);
+        }
+        if (materialId != null) {
+            wrapper.eq(SelectionExplainRecord::getMaterialId, materialId);
+        }
+        if (courseId != null) {
+            wrapper.eq(SelectionExplainRecord::getCourseId, courseId);
+        }
+        wrapper.orderByDesc(SelectionExplainRecord::getCreatedAt);
+
+        Page<SelectionExplainRecord> result = selectionExplainRecordMapper.selectPage(pageParam, wrapper);
+        List<SelectionExplainHistoryDto> records = result.getRecords().stream()
+                .map(this::toHistoryDto)
+                .collect(Collectors.toList());
+        return new PageResult<>(records, result.getTotal(), result.getSize(), result.getCurrent());
+    }
+
+    private SelectionExplainEvidenceDto toEvidenceItem(KnowledgeContextItem context) {
+        return new SelectionExplainEvidenceDto(
+                safe(context.getItemType()),
+                context.getReferenceId(),
+                safe(context.getTitle()),
+                safe(context.getSummary()),
+                safe(context.getSource()),
+                safe(context.getSourceUrl()));
+    }
+
+    private SelectionExplainHistoryDto toHistoryDto(SelectionExplainRecord record) {
+        SelectionExplainHistoryDto dto = new SelectionExplainHistoryDto();
+        dto.setRecordId(record.getId());
+        dto.setUserId(record.getUserId());
+        dto.setCourseId(record.getCourseId());
+        dto.setMaterialId(record.getMaterialId());
+        dto.setParseTaskId(record.getParseTaskId());
+        dto.setSelectedText(record.getSelectedText());
+        dto.setAnswer(record.getAnswer());
+        dto.setModelReasoning(record.getModelReasoning());
+        dto.setHasReliableEvidence(Integer.valueOf(1).equals(record.getHasReliableEvidence()));
+        dto.setEvidenceItems(readEvidenceItems(record.getEvidenceJson()));
+        dto.setCreatedAt(record.getCreatedAt());
+        return dto;
+    }
+
+    private String writeEvidenceJson(List<SelectionExplainEvidenceDto> evidenceItems) {
+        try {
+            return objectMapper.writeValueAsString(evidenceItems);
+        } catch (JsonProcessingException e) {
+            return "[]";
+        }
+    }
+
+    private List<SelectionExplainEvidenceDto> readEvidenceItems(String evidenceJson) {
+        if (evidenceJson == null || evidenceJson.isBlank()) {
+            return List.of();
+        }
+        try {
+            return objectMapper.readValue(evidenceJson, new TypeReference<List<SelectionExplainEvidenceDto>>() {
+            });
+        } catch (JsonProcessingException e) {
+            return List.of();
+        }
+    }
+
+    private String extractModelReasoning(String answer) {
+        String safeAnswer = safe(answer);
+        String marker = "Model Reasoning";
+        int markerIndex = safeAnswer.toLowerCase().indexOf(marker.toLowerCase());
+        if (markerIndex < 0) {
+            return safeAnswer;
+        }
+        String reasoning = safeAnswer.substring(markerIndex + marker.length())
+                .replaceFirst("^[\\s:：#-]+", "")
+                .trim();
+        return reasoning.isBlank() ? safeAnswer : reasoning;
     }
 
     private String safe(String value) {

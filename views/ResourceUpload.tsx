@@ -3,6 +3,7 @@ import {
   uploadApi,
   materialApi,
   dashboardApi,
+  chatApi,
   UploadTaskInfo,
   TeachingMaterialDraftInfo,
   TeachingMaterialSaveRequest,
@@ -10,17 +11,19 @@ import {
   TeachingTraceItemInfo,
   MaterialVersionItemInfo,
   TeachingMaterialTraceInfo,
-  CourseInfo
+  CourseInfo,
+  SelectionExplainResponse,
+  SelectionExplainHistoryInfo
 } from '../services/api';
 import {
   Upload, Button, Progress, Card, Typography, Space,
-  Alert, Spin, message, Avatar, Input, Divider, Tag, Select
+  Alert, Spin, message, Avatar, Input, Divider, Tag, Select, List
 } from 'antd';
 import {
   InboxOutlined, PlayCircleOutlined, CheckCircleOutlined,
   CloseCircleOutlined, FileTextOutlined, ReloadOutlined,
   FileWordOutlined, FilePdfOutlined, FileExcelOutlined, FilePptOutlined,
-  RobotOutlined, FileUnknownOutlined, DownloadOutlined
+  RobotOutlined, FileUnknownOutlined, DownloadOutlined, CopyOutlined
 } from '@ant-design/icons';
 
 const { Title, Text, Paragraph } = Typography;
@@ -58,6 +61,11 @@ export const ResourceUpload: React.FC<ResourceUploadProps> = ({ userId = 1 }) =>
   const [traceIdeologyFilter, setTraceIdeologyFilter] = useState('');
   const [traceUseCourseFilter, setTraceUseCourseFilter] = useState(false);
   const [rollbackTip, setRollbackTip] = useState('');
+  const [selectionExplainLoading, setSelectionExplainLoading] = useState(false);
+  const [selectionExplainResult, setSelectionExplainResult] = useState<SelectionExplainResponse | null>(null);
+  const [selectionExplainHistory, setSelectionExplainHistory] = useState<SelectionExplainHistoryInfo[]>([]);
+  const [selectionHistoryLoading, setSelectionHistoryLoading] = useState(false);
+  const [selectedLectureText, setSelectedLectureText] = useState('');
   const pollTimerRef = useRef<number | null>(null);
   const isUnmountedRef = useRef(false);
 
@@ -152,6 +160,33 @@ export const ResourceUpload: React.FC<ResourceUploadProps> = ({ userId = 1 }) =>
     }
   };
 
+  const loadSelectionExplainHistory = async (
+    materialId?: number | null,
+    courseId?: number | null,
+  ) => {
+    setSelectionHistoryLoading(true);
+    try {
+      const response = await chatApi.getSelectionExplainHistory({
+        userId,
+        materialId: materialId || undefined,
+        courseId: materialId ? undefined : courseId || undefined,
+        page: 1,
+        size: 10,
+      });
+      if (!isUnmountedRef.current) {
+        setSelectionExplainHistory(response.records || []);
+      }
+    } catch {
+      if (!isUnmountedRef.current) {
+        message.error('Failed to load selection explanation history');
+      }
+    } finally {
+      if (!isUnmountedRef.current) {
+        setSelectionHistoryLoading(false);
+      }
+    }
+  };
+
   useEffect(() => {
     const loadEditorDraft = async () => {
       const taskId = taskResult?.taskId;
@@ -167,6 +202,7 @@ export const ResourceUpload: React.FC<ResourceUploadProps> = ({ userId = 1 }) =>
         }
         await loadMaterialVersions(taskId);
         await loadTraceRows(taskId, draft.materialId);
+        await loadSelectionExplainHistory(draft.materialId, draft.courseId);
       } catch {
         if (!isUnmountedRef.current) {
           message.error('Failed to load editor draft');
@@ -263,6 +299,11 @@ export const ResourceUpload: React.FC<ResourceUploadProps> = ({ userId = 1 }) =>
     setTraceIdeologyFilter('');
     setTraceUseCourseFilter(false);
     setRollbackTip('');
+    setSelectionExplainLoading(false);
+    setSelectionExplainResult(null);
+    setSelectionExplainHistory([]);
+    setSelectionHistoryLoading(false);
+    setSelectedLectureText('');
   };
 
   const updateEditorDraft = (updater: (draft: TeachingMaterialDraftInfo) => TeachingMaterialDraftInfo) => {
@@ -361,6 +402,7 @@ export const ResourceUpload: React.FC<ResourceUploadProps> = ({ userId = 1 }) =>
       const saved = await uploadApi.saveEditorDraft(taskResult.taskId, buildSavePayload(editorDraft));
       setEditorDraft(saved);
       await loadTraceRows(taskResult.taskId, saved.materialId);
+      await loadSelectionExplainHistory(saved.materialId, saved.courseId);
       message.success('Draft saved');
     } catch (err: unknown) {
       message.error(err instanceof Error ? err.message : 'Failed to save draft');
@@ -388,6 +430,7 @@ export const ResourceUpload: React.FC<ResourceUploadProps> = ({ userId = 1 }) =>
       }
       await loadMaterialVersions(taskResult.taskId);
       await loadTraceRows(taskResult.taskId, saved.materialId);
+      await loadSelectionExplainHistory(saved.materialId, saved.courseId);
       setRollbackTip('');
       message.success(`Version ${saved.versionNo} saved`);
     } catch (err: unknown) {
@@ -420,6 +463,7 @@ export const ResourceUpload: React.FC<ResourceUploadProps> = ({ userId = 1 }) =>
         setSelectedCourseId(material.courseId);
       }
       await loadTraceRows(material.parseTaskId, material.materialId);
+      await loadSelectionExplainHistory(material.materialId, material.courseId);
       setRollbackTip('');
       message.success(`Loaded version ${material.versionNo}`);
     } catch (err: unknown) {
@@ -465,6 +509,7 @@ export const ResourceUpload: React.FC<ResourceUploadProps> = ({ userId = 1 }) =>
       }
       await loadMaterialVersions(taskResult.taskId);
       await loadTraceRows(taskResult.taskId, rolledBack.materialId);
+      await loadSelectionExplainHistory(rolledBack.materialId, rolledBack.courseId);
       const now = new Date().toLocaleString();
       setRollbackTip(`Rolled back from version v${versionNo} at ${now}. Unsaved until you click Save Draft or Save Version.`);
       message.success(`Rolled back from version v${versionNo}`);
@@ -478,6 +523,70 @@ export const ResourceUpload: React.FC<ResourceUploadProps> = ({ userId = 1 }) =>
   const handleSearchTraces = async () => {
     if (!taskResult?.taskId) return;
     await loadTraceRows(taskResult.taskId, editorDraft?.materialId || null);
+  };
+
+  const getSelectedText = () => {
+    const selected = selectedLectureText.trim() || window.getSelection()?.toString().trim() || '';
+    return selected.length > 4000 ? selected.slice(0, 4000) : selected;
+  };
+
+  const handleLectureSelection = (event: React.SyntheticEvent<HTMLTextAreaElement>) => {
+    const target = event.currentTarget;
+    const selected = target.value.slice(target.selectionStart, target.selectionEnd).trim();
+    setSelectedLectureText(selected);
+  };
+
+  const handleExplainSelection = async () => {
+    if (!taskResult?.taskId || !editorDraft) return;
+    const text = getSelectedText();
+    if (!text) {
+      message.warning('Select text in Lecture Notes before explaining');
+      return;
+    }
+    setSelectionExplainLoading(true);
+    try {
+      const response = await chatApi.explainSelection({
+        text,
+        userId,
+        courseId: editorDraft.courseId || selectedCourseId || null,
+        materialId: editorDraft.materialId || null,
+        parseTaskId: taskResult.taskId,
+      });
+      setSelectionExplainResult(response);
+      await loadSelectionExplainHistory(editorDraft.materialId, editorDraft.courseId || selectedCourseId || null);
+      message.success('Selection explained');
+    } catch (err: unknown) {
+      message.error(err instanceof Error ? err.message : 'Failed to explain selection');
+    } finally {
+      setSelectionExplainLoading(false);
+    }
+  };
+
+  const handleCopySelectionExplanation = async (answer?: string) => {
+    const content = answer || selectionExplainResult?.answer || '';
+    if (!content) {
+      message.warning('No explanation to copy');
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(content);
+      message.success('Explanation copied');
+    } catch {
+      message.error('Failed to copy explanation');
+    }
+  };
+
+  const handleAppendSelectionExplanation = (answer?: string) => {
+    const content = answer || selectionExplainResult?.answer || '';
+    if (!content) {
+      message.warning('No explanation to append');
+      return;
+    }
+    updateEditorDraft((draft) => ({
+      ...draft,
+      lectureNotes: `${draft.lectureNotes || ''}\n\n## Selection Explanation\n\n${content}`.trim(),
+    }));
+    message.success('Explanation appended to lecture notes');
   };
 
   const formatFileSize = (bytes: number): string => {
@@ -760,14 +869,165 @@ export const ResourceUpload: React.FC<ResourceUploadProps> = ({ userId = 1 }) =>
                   </div>
 
                   <div>
-                    <Text strong>Lecture Notes</Text>
+                    <Space style={{ width: '100%', justifyContent: 'space-between', marginBottom: 6 }}>
+                      <Text strong>Lecture Notes</Text>
+                      <Space>
+                        <Button
+                          size="small"
+                          icon={<RobotOutlined />}
+                          onClick={handleExplainSelection}
+                          loading={selectionExplainLoading}
+                          disabled={!editorDraft || editorLoading}
+                        >
+                          Explain Selection
+                        </Button>
+                        <Button
+                          size="small"
+                          onClick={() => loadSelectionExplainHistory(editorDraft.materialId, editorDraft.courseId)}
+                          loading={selectionHistoryLoading}
+                        >
+                          Refresh History
+                        </Button>
+                      </Space>
+                    </Space>
                     <TextArea
                       value={editorDraft.lectureNotes}
-                      onChange={(event) => updateEditorDraft((draft) => ({ ...draft, lectureNotes: event.target.value }))}
+                      onChange={(event) => {
+                        setSelectedLectureText('');
+                        updateEditorDraft((draft) => ({ ...draft, lectureNotes: event.target.value }));
+                      }}
+                      onSelect={handleLectureSelection}
+                      onKeyUp={handleLectureSelection}
+                      onMouseUp={handleLectureSelection}
                       autoSize={{ minRows: 6, maxRows: 14 }}
                       maxLength={10000}
                     />
                   </div>
+
+                  {(selectionExplainResult || selectionExplainHistory.length > 0) && (
+                    <Card size="small" style={{ borderRadius: 8 }}>
+                      <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+                        {selectionExplainResult && (
+                          <Space direction="vertical" size="small" style={{ width: '100%' }}>
+                            <Space style={{ width: '100%', justifyContent: 'space-between' }}>
+                              <Text strong>Selection Explanation</Text>
+                              <Space>
+                                <Button
+                                  size="small"
+                                  icon={<CopyOutlined />}
+                                  onClick={() => handleCopySelectionExplanation(selectionExplainResult.answer)}
+                                >
+                                  Copy
+                                </Button>
+                                <Button
+                                  size="small"
+                                  type="primary"
+                                  onClick={() => handleAppendSelectionExplanation(selectionExplainResult.answer)}
+                                >
+                                  Append to Notes
+                                </Button>
+                              </Space>
+                            </Space>
+                            {!selectionExplainResult.hasReliableEvidence && (
+                              <Alert
+                                type="warning"
+                                showIcon
+                                message="No reliable knowledge-base evidence found"
+                              />
+                            )}
+                            <Paragraph style={{ whiteSpace: 'pre-wrap', marginBottom: 0 }}>
+                              {selectionExplainResult.answer}
+                            </Paragraph>
+                            <Text strong>Knowledge Evidence</Text>
+                            <Space direction="vertical" style={{ width: '100%' }}>
+                              {(selectionExplainResult.evidenceItems || []).length > 0 ? (
+                                (selectionExplainResult.evidenceItems || []).map((item, index) => (
+                                  <Alert
+                                    key={`selection-evidence-${item.evidenceType}-${item.referenceId || index}`}
+                                    type="info"
+                                    showIcon={false}
+                                    message={
+                                      <Space direction="vertical" size={2}>
+                                        <Space wrap>
+                                          <Tag color="blue">{item.evidenceType || 'EVIDENCE'}</Tag>
+                                          <Text strong>{item.title || 'Untitled'}</Text>
+                                        </Space>
+                                        <Text type="secondary">{item.summary || '-'}</Text>
+                                        {(item.source || item.sourceUrl) && (
+                                          <Text style={{ fontSize: 12 }}>
+                                            {item.source || 'Source'} {item.sourceUrl ? `| ${item.sourceUrl}` : ''}
+                                          </Text>
+                                        )}
+                                      </Space>
+                                    }
+                                  />
+                                ))
+                              ) : (
+                                <Text type="secondary">No evidence items.</Text>
+                              )}
+                            </Space>
+                          </Space>
+                        )}
+
+                        <Divider style={{ margin: '4px 0' }} />
+                        <Space style={{ width: '100%', justifyContent: 'space-between' }}>
+                          <Text strong>Explanation History</Text>
+                          <Text type="secondary" style={{ fontSize: 12 }}>
+                            Latest {selectionExplainHistory.length} records
+                          </Text>
+                        </Space>
+                        <List
+                          loading={selectionHistoryLoading}
+                          dataSource={selectionExplainHistory}
+                          locale={{ emptyText: 'No explanation history.' }}
+                          renderItem={(item) => (
+                            <List.Item
+                              actions={[
+                                <Button
+                                  key="copy"
+                                  size="small"
+                                  onClick={() => handleCopySelectionExplanation(item.answer)}
+                                >
+                                  Copy
+                                </Button>,
+                                <Button
+                                  key="append"
+                                  size="small"
+                                  onClick={() => handleAppendSelectionExplanation(item.answer)}
+                                >
+                                  Append
+                                </Button>,
+                              ]}
+                            >
+                              <List.Item.Meta
+                                title={
+                                  <Space wrap>
+                                    <Text>{item.selectedText || 'Selected text'}</Text>
+                                    {item.hasReliableEvidence ? (
+                                      <Tag color="green">Evidence</Tag>
+                                    ) : (
+                                      <Tag color="orange">No Evidence</Tag>
+                                    )}
+                                  </Space>
+                                }
+                                description={
+                                  <Space direction="vertical" size={2}>
+                                    <Text type="secondary" style={{ fontSize: 12 }}>
+                                      {item.createdAt || '-'}
+                                    </Text>
+                                    <Text style={{ whiteSpace: 'pre-wrap' }}>
+                                      {(item.answer || '').slice(0, 240)}
+                                      {(item.answer || '').length > 240 ? '...' : ''}
+                                    </Text>
+                                  </Space>
+                                }
+                              />
+                            </List.Item>
+                          )}
+                        />
+                      </Space>
+                    </Card>
+                  )}
 
                   <Divider style={{ margin: '8px 0' }} />
                   <Space style={{ width: '100%', justifyContent: 'space-between' }}>

@@ -4,6 +4,7 @@ import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 /**
@@ -17,7 +18,25 @@ import java.util.List;
 @AllArgsConstructor
 public class SelectionExplainResponse {
 
+    private Long recordId;
+
     private String answer;
 
+    private String modelReasoning;
+
+    private Boolean hasReliableEvidence;
+
+    private List<SelectionExplainEvidenceDto> evidenceItems;
+
     private List<KnowledgeContextItem> contexts;
+
+    private LocalDateTime createdAt;
+
+    public SelectionExplainResponse(String answer, List<KnowledgeContextItem> contexts) {
+        this.answer = answer;
+        this.modelReasoning = answer;
+        this.hasReliableEvidence = contexts != null && !contexts.isEmpty();
+        this.evidenceItems = List.of();
+        this.contexts = contexts;
+    }
 }

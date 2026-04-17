@@ -43,11 +43,11 @@
 - [x] 上传文件与知识点、课程、生成内容之间的可追溯关系。已实现上传阶段 `courseId` 绑定（`parse_tasks`/`teaching_materials`），新增 `teaching_material_traces` 结构化追溯表，支持任务/版本维度检索与前端筛选展示。
 
 ## 六、选段解释与知识点说明
-- [~] 后端已有选段解释接口形态。
-- [ ] 前端教材/文档阅读场景中支持选择文本并发起解释。
-- [ ] 解释结果必须引用知识库来源，区分“知识库证据”和“模型推理”。
-- [ ] 支持教师或学生查看解释历史。
-- [ ] 支持解释内容复制、收藏或加入课程材料。
+- [x] 后端已有选段解释接口形态。已扩展为结构化请求/响应，支持课程、材料、解析任务上下文。
+- [x] 前端教材/文档阅读场景中支持选择文本并发起解释。当前已接入教师材料页 Lecture Notes 选段解释。
+- [x] 解释结果必须引用知识库来源，区分“知识库证据”和“模型推理”。已返回 evidenceItems、hasReliableEvidence，并在无证据时明确提示。
+- [x] 支持教师或学生查看解释历史。当前已支持教师材料页自动保存和查看解释历史；学生端阅读场景暂未接入。
+- [x] 支持解释内容复制、收藏或加入课程材料。当前支持复制和追加到当前讲义草稿；独立收藏库未做。
 
 ## 七、智能教学内容生成
 - [~] 根据上传文档或课程章节生成教学讲义。已接教师侧讲义编辑与草稿/版本保存，并支持 Markdown 导出；DOCX 与模板化排版仍待补齐。
@@ -116,3 +116,5 @@
 - `2026-04-16 19:05` | `teacher-edit-save-trace-closure` | 完成教师侧“编辑+保存+追溯”后端闭环与上传页最小前端接入：新增 `teaching_materials` 持久化模型、`editor-draft/materials/materials/{id}` 接口、草稿保存与正式版本递增、追溯 `trace_json` 构建与展示。关键文件：`backend/src/main/java/com/smartedu/service/TeachingMaterialService.java`、`backend/src/main/java/com/smartedu/controller/UploadController.java`、`backend/src/main/java/com/smartedu/controller/TeachingMaterialController.java`、`views/ResourceUpload.tsx`、`services/api.ts`。仍需：导出、课程级追溯关系建模、追溯检索能力。未验证项与风险：数据库迁移脚本需在目标环境执行；追溯当前为 JSON 快照，复杂查询性能有限。
 - `2026-04-16 20:36` | `material-version-history-and-markdown-export` | 完成“导出 + 版本闭环”本轮范围：新增按任务版本列表接口、材料 Markdown 下载接口、上传页版本历史回看与导出按钮；保持旧上传与解析接口兼容。关键文件：`backend/src/main/java/com/smartedu/service/TeachingMaterialService.java`、`backend/src/main/java/com/smartedu/controller/UploadController.java`、`backend/src/main/java/com/smartedu/controller/TeachingMaterialController.java`、`services/api.ts`、`views/ResourceUpload.tsx`。仍需：DOCX 导出、追溯检索拆表。未验证项与风险：导出文件名当前采用服务端安全化规则，未包含中文原始标题；并发编辑冲突策略仍未引入锁或乐观版本控制。
 - `2026-04-16 21:10` | `course-trace-rollback-closure` | 完成教师链路剩余闭环：上传接口支持可选 `courseId` 并写入任务与材料版本，AI 流水线注入课程知识上下文；新增 `teaching_material_traces` 独立表和任务/版本追溯检索接口；上传页补齐追溯筛选与“历史版本回退为草稿”显式动作。关键文件：`backend/src/main/java/com/smartedu/service/AiIntelligenceService.java`、`backend/src/main/java/com/smartedu/service/TeachingMaterialService.java`、`backend/src/main/java/com/smartedu/controller/UploadController.java`、`backend/src/main/java/com/smartedu/controller/TeachingMaterialController.java`、`views/ResourceUpload.tsx`、`services/api.ts`、`backend/src/main/resources/migration_material_trace_and_course_binding.sql`。仍需：DOCX 导出、追溯高级检索分析、并发编辑冲突治理。未验证项与风险：迁移脚本需在目标环境执行；旧历史数据依赖懒同步补齐追溯行。
+- `2026-04-17 15:21` | `selection-explain-closure` | 完成教师材料页选段解释闭环：扩展 `/api/chat/explain-selection` 结构化请求/响应，新增解释历史表与分页查询接口，前端支持选中文本解释、来源证据展示、历史查看、复制和追加到讲义草稿。关键文件：`backend/src/main/java/com/smartedu/service/ChatService.java`、`backend/src/main/java/com/smartedu/controller/ChatController.java`、`views/ResourceUpload.tsx`、`services/api.ts`、`backend/src/main/resources/migration_selection_explain_records.sql`。仍需：学生端阅读场景接入、独立收藏库。未验证项与风险：迁移脚本需在目标环境执行；真实模型输出质量取决于 provider 配置和知识库命中质量。
+- `2026-04-17 15:30` | `selection-explain-review` | 审查最新选段解释改动并修复教师材料页 Lecture Notes 选区读取问题：新增文本框选区状态，避免 `TextArea` 内选中文字后无法发起解释。关键文件：`views/ResourceUpload.tsx`。仍需：浏览器手动点击验收。已验证：`npm run build`、`mvn -q test` 通过；前端仍有既有 chunk 体积警告。

@@ -1,6 +1,9 @@
 package com.smartedu.controller;
 
 import com.smartedu.common.Result;
+import com.smartedu.common.PageResult;
+import com.smartedu.dto.SelectionExplainHistoryDto;
+import com.smartedu.dto.SelectionExplainRequestDto;
 import com.smartedu.dto.SelectionExplainResponse;
 import com.smartedu.entity.ChatMessage;
 import com.smartedu.entity.ChatSession;
@@ -87,18 +90,38 @@ public class ChatController {
      * 解释选中文本。
      */
     @PostMapping("/explain-selection")
-    public Result<SelectionExplainResponse> explainSelection(@RequestBody Map<String, String> request) {
-        String text = request.get("text");
+    public Result<SelectionExplainResponse> explainSelection(@RequestBody SelectionExplainRequestDto request) {
+        String text = request.getText();
         if (text == null || text.trim().isEmpty()) {
             return Result.badRequest("Text cannot be empty");
         }
 
         try {
-            SelectionExplainResponse response = chatService.explainSelection(text.trim());
+            request.setText(text.trim());
+            SelectionExplainResponse response = chatService.explainSelection(request);
             return Result.success(response);
         } catch (RuntimeException e) {
             return Result.error("Selection explanation failed: " + e.getMessage());
         }
+    }
+
+    /**
+     * Query selected-text explanation history.
+     */
+    @GetMapping("/explain-selection/history")
+    public Result<PageResult<SelectionExplainHistoryDto>> getSelectionExplainHistory(
+            @RequestParam(required = false) Long userId,
+            @RequestParam(required = false) Long materialId,
+            @RequestParam(required = false) Long courseId,
+            @RequestParam(defaultValue = "1") Integer page,
+            @RequestParam(defaultValue = "10") Integer size) {
+        PageResult<SelectionExplainHistoryDto> history = chatService.getSelectionExplainHistory(
+                userId,
+                materialId,
+                courseId,
+                page == null ? 1 : page,
+                size == null ? 10 : size);
+        return Result.success(history);
     }
 
     /**

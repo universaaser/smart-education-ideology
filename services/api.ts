@@ -113,8 +113,25 @@ export const chatApi = {
     get<{ sessionId: number; messages: ChatMessageInfo[] }>(`/chat/sessions/${sessionId}`),
   sendMessage: (sessionId: number, message: string) =>
     post<ChatMessageInfo>(`/chat/sessions/${sessionId}/message`, { message }),
-  explainSelection: (text: string) =>
-    post<SelectionExplainResponse>('/chat/explain-selection', { text }),
+  explainSelection: (request: SelectionExplainRequest | string) =>
+    post<SelectionExplainResponse>(
+      '/chat/explain-selection',
+      typeof request === 'string' ? { text: request } : request,
+    ),
+  getSelectionExplainHistory: (
+    params: { userId?: number; materialId?: number | null; courseId?: number | null; page?: number; size?: number } = {},
+  ) => {
+    const search = new URLSearchParams();
+    if (params.userId !== undefined) search.set('userId', String(params.userId));
+    if (params.materialId !== undefined && params.materialId !== null) search.set('materialId', String(params.materialId));
+    if (params.courseId !== undefined && params.courseId !== null) search.set('courseId', String(params.courseId));
+    if (params.page !== undefined) search.set('page', String(params.page));
+    if (params.size !== undefined) search.set('size', String(params.size));
+    const query = search.toString();
+    return get<PageResultInfo<SelectionExplainHistoryInfo>>(
+      `/chat/explain-selection/history${query ? `?${query}` : ''}`
+    );
+  },
   deleteSession: (sessionId: number) => del<void>(`/chat/sessions/${sessionId}`),
 };
 
@@ -350,9 +367,45 @@ export interface KnowledgeContextInfo {
   nodeType: string;
 }
 
+export interface SelectionExplainRequest {
+  text: string;
+  userId?: number;
+  courseId?: number | null;
+  materialId?: number | null;
+  parseTaskId?: number | null;
+}
+
+export interface SelectionExplainEvidenceInfo {
+  evidenceType: string;
+  referenceId?: number | null;
+  title: string;
+  summary: string;
+  source: string;
+  sourceUrl: string;
+}
+
 export interface SelectionExplainResponse {
+  recordId?: number | null;
   answer: string;
+  modelReasoning?: string;
+  hasReliableEvidence?: boolean;
+  evidenceItems?: SelectionExplainEvidenceInfo[];
   contexts: KnowledgeContextInfo[];
+  createdAt?: string;
+}
+
+export interface SelectionExplainHistoryInfo {
+  recordId: number;
+  userId: number;
+  courseId?: number | null;
+  materialId?: number | null;
+  parseTaskId?: number | null;
+  selectedText: string;
+  answer: string;
+  modelReasoning?: string;
+  hasReliableEvidence?: boolean;
+  evidenceItems?: SelectionExplainEvidenceInfo[];
+  createdAt?: string;
 }
 
 export interface ResourceInfo {
