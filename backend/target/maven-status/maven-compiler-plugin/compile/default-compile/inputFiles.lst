@@ -32,6 +32,9 @@ E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\dto\Knowled
 E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\dto\MaterialVersionItemDto.java
 E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\dto\PipelineResultDto.java
 E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\dto\RoleUiConfig.java
+E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\dto\SelectionExplainEvidenceDto.java
+E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\dto\SelectionExplainHistoryDto.java
+E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\dto\SelectionExplainRequestDto.java
 E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\dto\SelectionExplainResponse.java
 E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\dto\TeachingArtifactsDto.java
 E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\dto\TeachingMaterialDraftDto.java
@@ -50,6 +53,7 @@ E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\entity\Know
 E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\entity\KnowledgeRelation.java
 E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\entity\ParseTask.java
 E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\entity\Resource.java
+E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\entity\SelectionExplainRecord.java
 E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\entity\StudentActivity.java
 E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\entity\SubjectIdeologyMatch.java
 E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\entity\SubjectKnowledge.java
@@ -69,6 +73,7 @@ E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\mapper\Know
 E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\mapper\KnowledgeRelationMapper.java
 E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\mapper\ParseTaskMapper.java
 E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\mapper\ResourceMapper.java
+E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\mapper\SelectionExplainRecordMapper.java
 E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\mapper\StudentActivityMapper.java
 E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\mapper\SubjectIdeologyMatchMapper.java
 E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\mapper\SubjectKnowledgeMapper.java
