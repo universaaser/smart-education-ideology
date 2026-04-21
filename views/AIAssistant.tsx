@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { chatApi, ChatMessageInfo } from '../services/api';
-import { Input, Button, Dropdown, Space, Typography, Avatar, Spin } from 'antd';
+import { chatApi, ChatCitationInfo, ChatResponseInfo } from '../services/api';
+import { Input, Button, Dropdown, Space, Typography, Avatar, Spin, Tag } from 'antd';
 import {
   RobotOutlined, BulbOutlined, SendOutlined, UserOutlined,
   DownOutlined, CheckOutlined, LoadingOutlined, MessageOutlined
@@ -24,6 +24,8 @@ interface Message {
   role: 'user' | 'assistant';
   content: string;
   timestamp: string;
+  citations?: ChatCitationInfo[];
+  retrievalStatus?: string;
 }
 
 export const AIAssistant: React.FC = () => {
@@ -84,13 +86,15 @@ export const AIAssistant: React.FC = () => {
 
     try {
       const sid = await ensureSession();
-      const reply: ChatMessageInfo = await chatApi.sendMessage(sid, text);
+      const reply: ChatResponseInfo = await chatApi.sendMessage(sid, text);
 
       const assistantMsg: Message = {
-        id: `assistant-${reply.id || Date.now()}`,
+        id: `assistant-${reply.message.id || Date.now()}`,
         role: 'assistant',
-        content: reply.content,
+        content: reply.message.content,
         timestamp: now(),
+        citations: reply.citations || [],
+        retrievalStatus: reply.retrievalStatus,
       };
       setMessages(prev => [...prev, assistantMsg]);
     } catch {
@@ -118,6 +122,20 @@ export const AIAssistant: React.FC = () => {
   };
 
   const currentModel = AI_MODELS.find(m => m.value === selectedModel)!;
+
+  const retrievalText = (status?: string) => {
+    if (status === 'FOUND') return 'Knowledge base evidence found';
+    if (status === 'WEAK_MATCH') return 'Weak knowledge base match';
+    if (status === 'NO_CONTEXT') return 'No reliable knowledge base source';
+    return '';
+  };
+
+  const retrievalColor = (status?: string) => {
+    if (status === 'FOUND') return 'green';
+    if (status === 'WEAK_MATCH') return 'orange';
+    if (status === 'NO_CONTEXT') return 'red';
+    return 'default';
+  };
 
   const getMenuProps = () => {
     return {
@@ -225,6 +243,53 @@ export const AIAssistant: React.FC = () => {
                     {msg.content}
                   </div>
                 </div>
+                {msg.role === 'assistant' && msg.retrievalStatus && (
+                  <div style={{ marginTop: 8, marginLeft: 48, maxWidth: 'calc(100% - 48px)' }}>
+                    <Tag color={retrievalColor(msg.retrievalStatus)} style={{ marginBottom: 8 }}>
+                      {retrievalText(msg.retrievalStatus)}
+                    </Tag>
+                    {msg.citations && msg.citations.length > 0 ? (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                        {msg.citations.map((citation, index) => (
+                          <div
+                            key={`${citation.itemType}-${citation.referenceId}-${index}`}
+                            style={{
+                              padding: '8px 10px',
+                              border: '1px solid var(--color-border)',
+                              borderRadius: 8,
+                              background: 'var(--color-bg-panel)',
+                              fontSize: 12,
+                              color: '#475569',
+                              lineHeight: 1.5
+                            }}
+                          >
+                            <Text strong style={{ fontSize: 12 }}>{citation.title || 'Untitled source'}</Text>
+                            <div style={{ marginTop: 4, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                              {citation.snippet}
+                            </div>
+                            <div style={{ marginTop: 4 }}>
+                              {citation.source && <Text type="secondary" style={{ fontSize: 12 }}>{citation.source}</Text>}
+                              {citation.sourceUrl && (
+                                <a
+                                  href={citation.sourceUrl}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  style={{ marginLeft: citation.source ? 8 : 0 }}
+                                >
+                                  Source link
+                                </a>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <Text type="secondary" style={{ fontSize: 12 }}>
+                        No reliable knowledge-base evidence was retrieved for this answer.
+                      </Text>
+                    )}
+                  </div>
+                )}
                 <Text type="secondary" style={{ fontSize: 11, marginTop: 6, opacity: 0.8, padding: '0 48px' }}>
                   {msg.timestamp}
                 </Text>

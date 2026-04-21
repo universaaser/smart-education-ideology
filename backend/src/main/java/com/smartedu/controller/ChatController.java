@@ -2,6 +2,7 @@ package com.smartedu.controller;
 
 import com.smartedu.common.Result;
 import com.smartedu.common.PageResult;
+import com.smartedu.dto.ChatResponseDto;
 import com.smartedu.dto.SelectionExplainHistoryDto;
 import com.smartedu.dto.SelectionExplainRequestDto;
 import com.smartedu.dto.SelectionExplainResponse;
@@ -70,7 +71,7 @@ public class ChatController {
      * 发送消息。
      */
     @PostMapping("/sessions/{sessionId}/message")
-    public Result<ChatMessage> sendMessage(
+    public Result<ChatResponseDto> sendMessage(
             @PathVariable Long sessionId,
             @RequestBody Map<String, String> request) {
         String message = request.get("message");
@@ -79,7 +80,7 @@ public class ChatController {
         }
 
         try {
-            ChatMessage reply = chatService.sendMessage(sessionId, message);
+            ChatResponseDto reply = chatService.sendMessage(sessionId, message);
             return Result.success(reply);
         } catch (RuntimeException e) {
             return Result.error("AI response failed: " + e.getMessage());

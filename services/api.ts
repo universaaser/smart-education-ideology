@@ -112,7 +112,7 @@ export const chatApi = {
   getSessionDetail: (sessionId: number) =>
     get<{ sessionId: number; messages: ChatMessageInfo[] }>(`/chat/sessions/${sessionId}`),
   sendMessage: (sessionId: number, message: string) =>
-    post<ChatMessageInfo>(`/chat/sessions/${sessionId}/message`, { message }),
+    post<ChatResponseInfo>(`/chat/sessions/${sessionId}/message`, { message }),
   explainSelection: (request: SelectionExplainRequest | string) =>
     post<SelectionExplainResponse>(
       '/chat/explain-selection',
@@ -357,6 +357,23 @@ export interface ChatMessageInfo {
   createdAt: string;
 }
 
+export interface ChatCitationInfo {
+  itemType: string;
+  referenceId?: number | null;
+  title: string;
+  snippet: string;
+  source: string;
+  sourceUrl: string;
+  matchedBy: string;
+  score?: number | null;
+}
+
+export interface ChatResponseInfo {
+  message: ChatMessageInfo;
+  citations: ChatCitationInfo[];
+  retrievalStatus: 'FOUND' | 'WEAK_MATCH' | 'NO_CONTEXT' | string;
+}
+
 export interface KnowledgeContextInfo {
   itemType: string;
   referenceId: number;
@@ -365,6 +382,9 @@ export interface KnowledgeContextInfo {
   source: string;
   sourceUrl: string;
   nodeType: string;
+  snippet?: string;
+  score?: number | null;
+  matchedBy?: string;
 }
 
 export interface SelectionExplainRequest {

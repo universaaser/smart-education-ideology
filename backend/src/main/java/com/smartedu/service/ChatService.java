@@ -6,7 +6,10 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.smartedu.common.PageResult;
+import com.smartedu.dto.ChatCitationDto;
+import com.smartedu.dto.ChatResponseDto;
 import com.smartedu.dto.KnowledgeContextItem;
+import com.smartedu.dto.KnowledgeRetrievalResult;
 import com.smartedu.dto.SelectionExplainEvidenceDto;
 import com.smartedu.dto.SelectionExplainHistoryDto;
 import com.smartedu.dto.SelectionExplainRequestDto;
@@ -84,7 +87,7 @@ public class ChatService {
      * 发送消息并获取 AI 回复。
      */
     @Transactional
-    public ChatMessage sendMessage(Long sessionId, String userMessage) {
+    public ChatResponseDto sendMessage(Long sessionId, String userMessage) {
         ChatSession session = chatSessionMapper.selectById(sessionId);
         if (session == null) {
             throw new RuntimeException("Chat session does not exist");
@@ -108,7 +111,8 @@ public class ChatService {
                 })
                 .collect(Collectors.toList());
 
-        String systemPrompt = buildPromptWithKnowledgeContext(userMessage);
+        KnowledgeRetrievalResult retrievalResult = knowledgeRetrievalService.retrieveWithStatus(userMessage, 5);
+        String systemPrompt = buildPromptWithKnowledgeContext(retrievalResult);
         String providerKey = session.getAiModel();
         String aiResponse = aiIntelligenceService.chat(messages, systemPrompt, providerKey);
 
@@ -128,7 +132,10 @@ public class ChatService {
         }
         chatSessionMapper.updateById(session);
 
-        return aiMsg;
+        return new ChatResponseDto(
+                aiMsg,
+                retrievalResult.getContexts().stream().map(this::toChatCitation).collect(Collectors.toList()),
+                retrievalResult.getRetrievalStatus());
     }
 
     /**
@@ -145,14 +152,19 @@ public class ChatService {
     /**
      * 将知识库上下文拼接到系统提示词中，提升回答的可追溯性。
      */
-    private String buildPromptWithKnowledgeContext(String userMessage) {
-        List<KnowledgeContextItem> contexts = knowledgeRetrievalService.retrieveContext(userMessage, 3, 3);
+    private String buildPromptWithKnowledgeContext(KnowledgeRetrievalResult retrievalResult) {
+        List<KnowledgeContextItem> contexts = retrievalResult.getContexts();
         if (contexts.isEmpty()) {
-            return SYSTEM_PROMPT;
+            return SYSTEM_PROMPT + "\n\nNo reliable knowledge-base context was retrieved. "
+                    + "Clearly say that no reliable knowledge-base source was found before giving general teaching suggestions.";
         }
 
         StringBuilder context = new StringBuilder();
-        context.append("\n\nPlease prioritize the following knowledge-base materials when answering. Include source links when relevant:\n");
+        if (KnowledgeRetrievalService.STATUS_WEAK_MATCH.equals(retrievalResult.getRetrievalStatus())) {
+            context.append("\n\nKnowledge-base retrieval is weak. Say that the retrieved materials may be only partially related before answering.\n");
+        }
+        context.append("\n\nPlease prioritize the following knowledge-base materials when answering. ")
+                .append("Do not invent source links. Include source links only from the provided materials:\n");
 
         for (int i = 0; i < contexts.size(); i++) {
             KnowledgeContextItem item = contexts.get(i);
@@ -161,13 +173,26 @@ public class ChatService {
                     .append("Title: ").append(safe(item.getTitle())).append("\n")
                     .append("Source: ").append(safe(item.getSource())).append("\n")
                     .append("Link: ").append(safe(item.getSourceUrl())).append("\n")
-                    .append("Summary: ").append(truncate(safe(item.getSummary()), 220)).append("\n\n");
+                    .append("Snippet: ").append(truncate(firstNonBlank(item.getSnippet(), item.getSummary()), 260)).append("\n")
+                    .append("Matched By: ").append(safe(item.getMatchedBy())).append("\n\n");
         }
 
         context.append("If the materials are insufficient, say so clearly and provide a general suggestion. ")
                 .append("If a material is cited, include the corresponding source link when possible.");
 
         return SYSTEM_PROMPT + context;
+    }
+
+    private ChatCitationDto toChatCitation(KnowledgeContextItem item) {
+        return new ChatCitationDto(
+                safe(item.getItemType()),
+                item.getReferenceId(),
+                safe(item.getTitle()),
+                truncate(firstNonBlank(item.getSnippet(), item.getSummary()), 220),
+                safe(item.getSource()),
+                safe(item.getSourceUrl()),
+                safe(item.getMatchedBy()),
+                item.getScore());
     }
 
     /**
@@ -330,6 +355,13 @@ public class ChatService {
 
     private String safe(String value) {
         return value == null ? "" : value;
+    }
+
+    private String firstNonBlank(String first, String second) {
+        if (first != null && !first.isBlank()) {
+            return first;
+        }
+        return safe(second);
     }
 
     private String truncate(String value, int maxLen) {

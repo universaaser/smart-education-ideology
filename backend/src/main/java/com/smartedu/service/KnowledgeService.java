@@ -36,6 +36,7 @@ public class KnowledgeService {
     private final IdeologyKnowledgeMapper ideologyKnowledgeMapper;
     private final SubjectIdeologyMatchMapper subjectIdeologyMatchMapper;
     private final KnowledgeRelationMapper knowledgeRelationMapper;
+    private final KnowledgeChunkService knowledgeChunkService;
 
     public List<KnowledgeNodeView> getAllNodes() {
         List<KnowledgeNodeView> nodes = new ArrayList<>();
@@ -123,6 +124,7 @@ public class KnowledgeService {
         subject.setCreatedAt(LocalDateTime.now());
         subject.setUpdatedAt(LocalDateTime.now());
         subjectKnowledgeMapper.insert(subject);
+        knowledgeChunkService.refreshSubjectKnowledgeChunks(subject);
         return KnowledgeViewMapper.toSubjectNode(subject);
     }
 
@@ -151,6 +153,7 @@ public class KnowledgeService {
         subject.setSubTitle(node.getSubTitle());
         subject.setUpdatedAt(LocalDateTime.now());
         subjectKnowledgeMapper.updateById(subject);
+        knowledgeChunkService.refreshSubjectKnowledgeChunks(subject);
         return KnowledgeViewMapper.toSubjectNode(subject);
     }
 
@@ -171,6 +174,7 @@ public class KnowledgeService {
         subjectIdeologyMatchMapper.delete(matchWrapper);
 
         subjectKnowledgeMapper.deleteById(id);
+        knowledgeChunkService.deleteChunks("SUBJECT_KNOWLEDGE", id);
     }
 
     @Transactional

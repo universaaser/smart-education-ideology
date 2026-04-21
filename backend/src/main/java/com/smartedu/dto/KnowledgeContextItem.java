@@ -15,6 +15,24 @@ import lombok.NoArgsConstructor;
 @AllArgsConstructor
 public class KnowledgeContextItem {
 
+    public KnowledgeContextItem(
+            String itemType,
+            Long referenceId,
+            String title,
+            String summary,
+            String source,
+            String sourceUrl,
+            String nodeType) {
+        this.itemType = itemType;
+        this.referenceId = referenceId;
+        this.title = title;
+        this.summary = summary;
+        this.source = source;
+        this.sourceUrl = sourceUrl;
+        this.nodeType = nodeType;
+        this.snippet = summary;
+    }
+
     private String itemType;
 
     private Long referenceId;
@@ -28,4 +46,10 @@ public class KnowledgeContextItem {
     private String sourceUrl;
 
     private String nodeType;
+
+    private String snippet;
+
+    private Double score;
+
+    private String matchedBy;
 }

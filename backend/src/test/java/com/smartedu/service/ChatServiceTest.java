@@ -153,7 +153,7 @@ class ChatServiceTest {
         private final List<KnowledgeContextItem> contexts;
 
         StubKnowledgeRetrievalService(List<KnowledgeContextItem> contexts) {
-            super(null, null, null, null, null, null);
+            super(null, null, null, null, null, null, null);
             this.contexts = contexts;
         }
 

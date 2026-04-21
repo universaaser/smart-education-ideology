@@ -2,10 +2,13 @@ package com.smartedu.controller;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.smartedu.common.PageResult;
+import com.smartedu.dto.ChatCitationDto;
+import com.smartedu.dto.ChatResponseDto;
 import com.smartedu.dto.SelectionExplainEvidenceDto;
 import com.smartedu.dto.SelectionExplainHistoryDto;
 import com.smartedu.dto.SelectionExplainRequestDto;
 import com.smartedu.dto.SelectionExplainResponse;
+import com.smartedu.entity.ChatMessage;
 import com.smartedu.mapper.ChatMessageMapper;
 import com.smartedu.mapper.ChatSessionMapper;
 import com.smartedu.mapper.SelectionExplainRecordMapper;
@@ -66,6 +69,18 @@ class ChatControllerTest {
                 .andExpect(jsonPath("$.data.total").value(1));
     }
 
+    @Test
+    void shouldSendMessageAndReturnCitations() throws Exception {
+        mockMvc.perform(post("/api/chat/sessions/1/message")
+                        .contentType("application/json")
+                        .content("{\"message\":\"sensor network\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200))
+                .andExpect(jsonPath("$.data.message.content").value("answer"))
+                .andExpect(jsonPath("$.data.retrievalStatus").value("FOUND"))
+                .andExpect(jsonPath("$.data.citations[0].title").value("Sensor"));
+    }
+
     private static class StubChatService extends ChatService {
 
         StubChatService() {
@@ -85,6 +100,28 @@ class ChatControllerTest {
                     (AiIntelligenceService) null,
                     (KnowledgeRetrievalService) null,
                     new ObjectMapper());
+        }
+
+        @Override
+        public ChatResponseDto sendMessage(Long sessionId, String userMessage) {
+            ChatMessage message = new ChatMessage();
+            message.setId(11L);
+            message.setSessionId(sessionId);
+            message.setRole("ASSISTANT");
+            message.setContent("answer");
+            message.setContentType("TEXT");
+            return new ChatResponseDto(
+                    message,
+                    List.of(new ChatCitationDto(
+                            "SUBJECT_KNOWLEDGE",
+                            1L,
+                            "Sensor",
+                            "Industrial sensor evidence",
+                            "People Daily",
+                            "https://example.com/sensor",
+                            "FULLTEXT",
+                            1.0D)),
+                    "FOUND");
         }
 
         @Override

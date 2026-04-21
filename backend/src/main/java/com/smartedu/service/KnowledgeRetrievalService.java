@@ -2,17 +2,21 @@ package com.smartedu.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.smartedu.dto.KnowledgeContextItem;
+import com.smartedu.dto.KnowledgeRetrievalResult;
 import com.smartedu.entity.IdeologyKnowledge;
+import com.smartedu.entity.KnowledgeChunk;
 import com.smartedu.entity.Resource;
 import com.smartedu.entity.SubjectIdeologyMatch;
 import com.smartedu.entity.SubjectKnowledge;
 import com.smartedu.entity.SubjectKnowledgeSource;
 import com.smartedu.mapper.IdeologyKnowledgeMapper;
+import com.smartedu.mapper.KnowledgeChunkMapper;
 import com.smartedu.mapper.ResourceMapper;
 import com.smartedu.mapper.SubjectIdeologyMatchMapper;
 import com.smartedu.mapper.SubjectKnowledgeMapper;
 import com.smartedu.mapper.SubjectKnowledgeSourceMapper;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -21,15 +25,22 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 统一知识检索服务
+ * 统一知识检索服务。
  *
  * <p>
- * 将知识点检索和资源检索收敛到同一入口，避免聊天、解释、推荐各自维护不同的查询逻辑。
+ * 当前实现是轻量 RAG：优先检索 knowledge_chunks，失败或不足时回退到旧的知识点/资源 LIKE 检索，
+ * 不引入 embedding 和向量库。
  */
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class KnowledgeRetrievalService {
 
+    public static final String STATUS_FOUND = "FOUND";
+    public static final String STATUS_WEAK_MATCH = "WEAK_MATCH";
+    public static final String STATUS_NO_CONTEXT = "NO_CONTEXT";
+
+    private final KnowledgeChunkMapper knowledgeChunkMapper;
     private final SubjectKnowledgeMapper subjectKnowledgeMapper;
     private final SubjectKnowledgeSourceMapper subjectKnowledgeSourceMapper;
     private final SubjectIdeologyMatchMapper subjectIdeologyMatchMapper;
@@ -37,38 +48,62 @@ public class KnowledgeRetrievalService {
     private final ResourceMapper resourceMapper;
     private final ResourceService resourceService;
 
-    /**
-     * 返回混合上下文，优先包含知识点，再补充原始资源，供聊天或解释接口直接拼接提示词。
-     */
     public List<KnowledgeContextItem> retrieveContext(String query, int knowledgeLimit, int resourceLimit) {
-        int safeKnowledgeLimit = clampLimit(knowledgeLimit, 1, 6);
-        int safeResourceLimit = clampLimit(resourceLimit, 1, 6);
+        return retrieveWithStatus(query, knowledgeLimit + resourceLimit).getContexts();
+    }
 
+    public KnowledgeRetrievalResult retrieveWithStatus(String query, int limit) {
+        int safeLimit = clampLimit(limit, 1, 8);
         Map<String, KnowledgeContextItem> items = new LinkedHashMap<>();
 
-        for (SubjectKnowledge subjectKnowledge : findRelevantSubjectKnowledge(query, safeKnowledgeLimit)) {
+        for (KnowledgeChunk chunk : searchChunksFullText(query, safeLimit)) {
+            KnowledgeContextItem item = buildChunkContext(chunk, "FULLTEXT");
+            items.putIfAbsent(chunkKey(chunk), item);
+        }
+
+        if (items.size() < safeLimit) {
+            for (KnowledgeChunk chunk : searchChunksLike(query, safeLimit - items.size())) {
+                KnowledgeContextItem item = buildChunkContext(chunk, "LIKE");
+                items.putIfAbsent(chunkKey(chunk), item);
+            }
+        }
+
+        if (!items.isEmpty()) {
+            String status = items.values().stream()
+                    .anyMatch(item -> "FULLTEXT".equals(item.getMatchedBy()))
+                    ? STATUS_FOUND
+                    : STATUS_WEAK_MATCH;
+            return new KnowledgeRetrievalResult(status, new ArrayList<>(items.values()));
+        }
+
+        for (SubjectKnowledge subjectKnowledge : findRelevantSubjectKnowledge(query, Math.min(3, safeLimit))) {
             KnowledgeContextItem item = buildSubjectKnowledgeContext(subjectKnowledge);
+            item.setMatchedBy("LEGACY_LIKE");
+            item.setSnippet(item.getSummary());
             items.putIfAbsent("SK-" + subjectKnowledge.getId(), item);
         }
 
-        for (Resource resource : resourceService.searchForChatContext(query, safeResourceLimit)) {
-            KnowledgeContextItem item = new KnowledgeContextItem(
-                    "RESOURCE",
-                    resource.getId(),
-                    safe(resource.getTitle()),
-                    firstNonBlank(resource.getIdeologySummary(), resource.getContent()),
-                    safe(resource.getSource()),
-                    safe(resource.getSourceUrl()),
-                    "");
-            items.putIfAbsent("RS-" + resource.getId(), item);
+        if (resourceService != null) {
+            int remaining = Math.max(1, safeLimit - items.size());
+            for (Resource resource : resourceService.searchForChatContext(query, Math.min(3, remaining))) {
+                KnowledgeContextItem item = new KnowledgeContextItem(
+                        "RESOURCE",
+                        resource.getId(),
+                        safe(resource.getTitle()),
+                        firstNonBlank(resource.getIdeologySummary(), resource.getContent()),
+                        safe(resource.getSource()),
+                        safe(resource.getSourceUrl()),
+                        "");
+                item.setMatchedBy("LEGACY_LIKE");
+                item.setSnippet(truncate(item.getSummary(), 260));
+                items.putIfAbsent("RS-" + resource.getId(), item);
+            }
         }
 
-        return new ArrayList<>(items.values());
+        String status = items.isEmpty() ? STATUS_NO_CONTEXT : STATUS_WEAK_MATCH;
+        return new KnowledgeRetrievalResult(status, new ArrayList<>(items.values()));
     }
 
-    /**
-     * 提供给课程自动关联和未来解释接口使用的知识点检索入口。
-     */
     public List<SubjectKnowledge> findRelevantSubjectKnowledge(String query, int limit) {
         int safeLimit = clampLimit(limit, 1, 10);
         LambdaQueryWrapper<SubjectKnowledge> wrapper = new LambdaQueryWrapper<>();
@@ -101,20 +136,78 @@ public class KnowledgeRetrievalService {
                 .orderByDesc(SubjectKnowledge::getCreatedAt)
                 .last("LIMIT " + safeLimit);
 
-        return subjectKnowledgeMapper.selectList(wrapper);
+        return subjectKnowledgeMapper == null ? List.of() : subjectKnowledgeMapper.selectList(wrapper);
+    }
+
+    private List<KnowledgeChunk> searchChunksFullText(String query, int limit) {
+        if (knowledgeChunkMapper == null || query == null || query.isBlank()) {
+            return List.of();
+        }
+        try {
+            return knowledgeChunkMapper.searchFullText(query, clampLimit(limit, 1, 8));
+        } catch (RuntimeException ex) {
+            log.warn("Knowledge chunk fulltext retrieval failed, fallback to LIKE: {}", ex.getMessage());
+            return List.of();
+        }
+    }
+
+    private List<KnowledgeChunk> searchChunksLike(String query, int limit) {
+        if (knowledgeChunkMapper == null || query == null || query.isBlank() || limit <= 0) {
+            return List.of();
+        }
+        List<String> searchTerms = tokenize(query);
+        if (searchTerms.isEmpty()) {
+            return List.of();
+        }
+
+        LambdaQueryWrapper<KnowledgeChunk> wrapper = new LambdaQueryWrapper<>();
+        wrapper.and(group -> {
+            boolean firstTerm = true;
+            for (String term : searchTerms) {
+                if (!firstTerm) {
+                    group.or();
+                }
+                group.and(w -> w.like(KnowledgeChunk::getTitle, term)
+                        .or()
+                        .like(KnowledgeChunk::getContent, term)
+                        .or()
+                        .like(KnowledgeChunk::getKnowledgePointName, term)
+                        .or()
+                        .like(KnowledgeChunk::getIdeologyElement, term)
+                        .or()
+                        .like(KnowledgeChunk::getSource, term));
+                firstTerm = false;
+            }
+        });
+        wrapper.orderByDesc(KnowledgeChunk::getUpdatedAt)
+                .last("LIMIT " + clampLimit(limit, 1, 8));
+        return knowledgeChunkMapper.selectList(wrapper);
+    }
+
+    private KnowledgeContextItem buildChunkContext(KnowledgeChunk chunk, String matchedBy) {
+        KnowledgeContextItem item = new KnowledgeContextItem(
+                safe(chunk.getSourceType()),
+                chunk.getSourceId(),
+                safe(chunk.getTitle()),
+                safe(chunk.getContent()),
+                safe(chunk.getSource()),
+                safe(chunk.getSourceUrl()),
+                "CHUNK");
+        item.setSnippet(truncate(safe(chunk.getContent()), 260));
+        item.setMatchedBy(matchedBy);
+        item.setScore(chunk.getSearchScore());
+        return item;
     }
 
     private KnowledgeContextItem buildSubjectKnowledgeContext(SubjectKnowledge subjectKnowledge) {
-        // Prefer the newest source trace so downstream prompts always receive a stable
-        // and explainable evidence link for the current subject knowledge record.
         LambdaQueryWrapper<SubjectKnowledgeSource> sourceWrapper = new LambdaQueryWrapper<>();
         sourceWrapper.eq(SubjectKnowledgeSource::getSubjectKnowledgeId, subjectKnowledge.getId())
                 .orderByDesc(SubjectKnowledgeSource::getUpdatedAt)
                 .last("LIMIT 1");
-        SubjectKnowledgeSource sourceLink = subjectKnowledgeSourceMapper.selectOne(sourceWrapper);
+        SubjectKnowledgeSource sourceLink = subjectKnowledgeSourceMapper == null ? null : subjectKnowledgeSourceMapper.selectOne(sourceWrapper);
 
         Resource resource = null;
-        if (sourceLink != null && sourceLink.getResourceId() != null) {
+        if (sourceLink != null && sourceLink.getResourceId() != null && resourceMapper != null) {
             resource = resourceMapper.selectById(sourceLink.getResourceId());
         }
 
@@ -123,18 +216,16 @@ public class KnowledgeRetrievalService {
                 .orderByDesc(SubjectIdeologyMatch::getIsPrimary)
                 .orderByDesc(SubjectIdeologyMatch::getMatchScore)
                 .last("LIMIT 1");
-        SubjectIdeologyMatch match = subjectIdeologyMatchMapper.selectOne(matchWrapper);
+        SubjectIdeologyMatch match = subjectIdeologyMatchMapper == null ? null : subjectIdeologyMatchMapper.selectOne(matchWrapper);
 
         String ideologyTitle = "";
         String ideologyReason = "";
-        if (match != null) {
+        if (match != null && ideologyKnowledgeMapper != null) {
             IdeologyKnowledge ideology = ideologyKnowledgeMapper.selectById(match.getIdeologyKnowledgeId());
             ideologyTitle = ideology == null ? "" : ideology.getName();
             ideologyReason = match.getMatchReason() == null ? "" : match.getMatchReason();
         }
 
-        // Assemble a compact retrieval summary once here so chat and explain-selection can
-        // share the same context format without duplicating cross-table join logic.
         String summary = safe(subjectKnowledge.getSummary());
         if (!ideologyTitle.isBlank()) {
             summary = summary + "\nMatched Ideology: " + ideologyTitle;
@@ -153,21 +244,21 @@ public class KnowledgeRetrievalService {
                 "TECH");
     }
 
+    private String chunkKey(KnowledgeChunk chunk) {
+        return safe(chunk.getSourceType()) + "-" + chunk.getSourceId() + "-" + chunk.getChunkIndex();
+    }
+
     private int clampLimit(int value, int min, int max) {
         return Math.max(min, Math.min(max, value));
     }
 
-    /**
-     * 将长文本拆成少量短语，提升知识点和资源命中率，同时控制 SQL 复杂度。
-     */
     private List<String> tokenize(String query) {
         List<String> terms = new ArrayList<>();
         if (query == null || query.isBlank()) {
             return terms;
         }
 
-        // Keep the token count intentionally small so the generated SQL stays predictable.
-        for (String part : query.split("[\\s,，。；;：:、|/]+")) {
+        for (String part : query.split("[\\s,，。；;、/]+")) {
             String term = part.trim();
             if (term.length() >= 2 && !terms.contains(term)) {
                 terms.add(term);
@@ -188,5 +279,15 @@ public class KnowledgeRetrievalService {
 
     private String safe(String value) {
         return value == null ? "" : value;
+    }
+
+    private String truncate(String value, int maxLen) {
+        if (value == null) {
+            return "";
+        }
+        if (value.length() <= maxLen) {
+            return value;
+        }
+        return value.substring(0, maxLen) + "...";
     }
 }

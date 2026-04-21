@@ -61,7 +61,7 @@
 - [x] AI 对话页面和会话保存基础能力。
 - [x] 前端模型选择入口。
 - [~] 后端多 provider 路由和失败回退。Gemini 当前仍是预留回退，不算真实完成。
-- [~] RAG 增强回答。仍需补引用展示、检索命中可解释性、无来源时的提示。
+- [~] RAG 增强回答。已具备 chunk 级检索、结构化引用展示和 FOUND/WEAK_MATCH/NO_CONTEXT 提示；仍未实现向量检索、重排序和 RAG 自动评估。
 - [ ] 按业务场景区分模型用途，例如聊天、文档解析、视觉分析、题目生成。
 - [ ] 模型配置页面或至少完善环境变量模板和部署说明。
 
@@ -118,3 +118,4 @@
 - `2026-04-16 21:10` | `course-trace-rollback-closure` | 完成教师链路剩余闭环：上传接口支持可选 `courseId` 并写入任务与材料版本，AI 流水线注入课程知识上下文；新增 `teaching_material_traces` 独立表和任务/版本追溯检索接口；上传页补齐追溯筛选与“历史版本回退为草稿”显式动作。关键文件：`backend/src/main/java/com/smartedu/service/AiIntelligenceService.java`、`backend/src/main/java/com/smartedu/service/TeachingMaterialService.java`、`backend/src/main/java/com/smartedu/controller/UploadController.java`、`backend/src/main/java/com/smartedu/controller/TeachingMaterialController.java`、`views/ResourceUpload.tsx`、`services/api.ts`、`backend/src/main/resources/migration_material_trace_and_course_binding.sql`。仍需：DOCX 导出、追溯高级检索分析、并发编辑冲突治理。未验证项与风险：迁移脚本需在目标环境执行；旧历史数据依赖懒同步补齐追溯行。
 - `2026-04-17 15:21` | `selection-explain-closure` | 完成教师材料页选段解释闭环：扩展 `/api/chat/explain-selection` 结构化请求/响应，新增解释历史表与分页查询接口，前端支持选中文本解释、来源证据展示、历史查看、复制和追加到讲义草稿。关键文件：`backend/src/main/java/com/smartedu/service/ChatService.java`、`backend/src/main/java/com/smartedu/controller/ChatController.java`、`views/ResourceUpload.tsx`、`services/api.ts`、`backend/src/main/resources/migration_selection_explain_records.sql`。仍需：学生端阅读场景接入、独立收藏库。未验证项与风险：迁移脚本需在目标环境执行；真实模型输出质量取决于 provider 配置和知识库命中质量。
 - `2026-04-17 15:30` | `selection-explain-review` | 审查最新选段解释改动并修复教师材料页 Lecture Notes 选区读取问题：新增文本框选区状态，避免 `TextArea` 内选中文字后无法发起解释。关键文件：`views/ResourceUpload.tsx`。仍需：浏览器手动点击验收。已验证：`npm run build`、`mvn -q test` 通过；前端仍有既有 chunk 体积警告。
+- `2026-04-19 20:54` | `light-rag-improvement` | 完成轻量 RAG 改进：新增 `knowledge_chunks` 检索片段表、FULLTEXT/LIKE 混合召回、聊天接口结构化 citations 和前端引用展示。关键文件：`backend/src/main/java/com/smartedu/service/KnowledgeRetrievalService.java`、`backend/src/main/java/com/smartedu/service/KnowledgeChunkService.java`、`backend/src/main/resources/migration_light_rag_chunks.sql`、`services/api.ts`、`views/AIAssistant.tsx`。仍需：目标环境执行迁移脚本；向量检索、reranker、自动评估未实现。已验证：`mvn -q test`、`npm run build` 通过；未做浏览器手动点击验收。

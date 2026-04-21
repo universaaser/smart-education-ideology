@@ -25,6 +25,7 @@ import java.util.List;
 public class ResourceService {
 
     private final ResourceMapper resourceMapper;
+    private final KnowledgeChunkService knowledgeChunkService;
 
     /**
      * 获取所有资源列表
@@ -168,6 +169,7 @@ public class ResourceService {
             resource.setSyncStatus("PENDING");
         }
         resourceMapper.insert(resource);
+        knowledgeChunkService.refreshResourceChunks(resource);
         return resource;
     }
 
@@ -178,7 +180,9 @@ public class ResourceService {
     public Resource updateResource(Resource resource) {
         resource.setUpdatedAt(LocalDateTime.now());
         resourceMapper.updateById(resource);
-        return resourceMapper.selectById(resource.getId());
+        Resource updated = resourceMapper.selectById(resource.getId());
+        knowledgeChunkService.refreshResourceChunks(updated);
+        return updated;
     }
 
     /**
@@ -187,6 +191,7 @@ public class ResourceService {
     @Transactional
     public void deleteResource(Long id) {
         resourceMapper.deleteById(id);
+        knowledgeChunkService.deleteChunks("RESOURCE", id);
     }
 
     /**

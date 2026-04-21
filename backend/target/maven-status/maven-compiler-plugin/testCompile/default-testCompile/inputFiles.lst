@@ -4,4 +4,6 @@ E:\study\smart-education-ideology\backend\src\test\java\com\smartedu\controller\
 E:\study\smart-education-ideology\backend\src\test\java\com\smartedu\service\AiIntelligenceServiceTest.java
 E:\study\smart-education-ideology\backend\src\test\java\com\smartedu\service\AiPipelineJsonValidatorTest.java
 E:\study\smart-education-ideology\backend\src\test\java\com\smartedu\service\ChatServiceTest.java
+E:\study\smart-education-ideology\backend\src\test\java\com\smartedu\service\KnowledgeChunkServiceTest.java
+E:\study\smart-education-ideology\backend\src\test\java\com\smartedu\service\KnowledgeRetrievalServiceTest.java
 E:\study\smart-education-ideology\backend\src\test\java\com\smartedu\service\TeachingMaterialServiceTest.java

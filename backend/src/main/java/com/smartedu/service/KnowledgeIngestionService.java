@@ -51,6 +51,7 @@ public class KnowledgeIngestionService {
     private final KnowledgeRelationMapper knowledgeRelationMapper;
     private final SubjectKnowledgeSourceMapper subjectKnowledgeSourceMapper;
     private final ObjectMapper objectMapper;
+    private final KnowledgeChunkService knowledgeChunkService;
 
     /**
      * 将已有资源转换为知识点和来源信息。
@@ -112,6 +113,7 @@ public class KnowledgeIngestionService {
         } else {
             subjectKnowledgeMapper.updateById(subjectKnowledge);
         }
+        knowledgeChunkService.refreshSubjectKnowledgeChunks(subjectKnowledge);
         return subjectKnowledge;
     }
 
