@@ -1,12 +1,12 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { knowledgeApi, knowledgeExcelApi, KnowledgeNodeInfo, KnowledgeRelationInfo, resourceApi, CrawlTaskStatusInfo } from '../services/api';
-import { 
-  Input, Button, Drawer, Space, Typography, Tag, Select, 
-  Spin, message, Tooltip, Divider, Form 
+import {
+  Input, Button, Drawer, Space, Typography, Tag, Select,
+  Spin, message, Tooltip, Divider, Form
 } from 'antd';
 import {
   SearchOutlined, PlusOutlined, MinusOutlined, SyncOutlined,
-  StopOutlined, DownloadOutlined, UploadOutlined, CloseOutlined,
+  StopOutlined, DownloadOutlined, UploadOutlined,
   LinkOutlined, ShareAltOutlined
 } from '@ant-design/icons';
 
@@ -49,7 +49,6 @@ export const KnowledgeGraph: React.FC<KnowledgeGraphProps> = ({ crawlStatus, ref
   const [panStart, setPanStart] = useState({ x: 0, y: 0 });
   const [draggingNodeId, setDraggingNodeId] = useState<number | null>(null);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
-  
   const [showAddRelation, setShowAddRelation] = useState(false);
   const [relationForm] = Form.useForm();
   const [addingRelation, setAddingRelation] = useState(false);
@@ -67,7 +66,7 @@ export const KnowledgeGraph: React.FC<KnowledgeGraphProps> = ({ crawlStatus, ref
       setNodes(data.nodes || []);
       setConnections(data.relations || []);
     } catch {
-      // NOTE: keep empty graph when backend unavailable
+      // Keep an empty graph when the backend is unavailable.
     } finally {
       if (showLoading) setLoading(false);
     }
@@ -81,23 +80,23 @@ export const KnowledgeGraph: React.FC<KnowledgeGraphProps> = ({ crawlStatus, ref
   const isCrawling = crawlState === 'RUNNING' || crawlState === 'STOP_REQUESTED';
 
   useEffect(() => {
-    const prev = lastCrawlStateRef.current;
+    const previous = lastCrawlStateRef.current;
     const current = crawlState;
-    const wasRunning = prev === 'RUNNING' || prev === 'STOP_REQUESTED';
+    const wasRunning = previous === 'RUNNING' || previous === 'STOP_REQUESTED';
     const ended = current === 'COMPLETED' || current === 'STOPPED' || current === 'FAILED';
 
     if (wasRunning && ended) {
       const result = crawlStatus?.lastResult;
       if (current === 'COMPLETED' && result) {
-        message.success(`更新完成: +${result.totalCreated}, 去重 ${result.totalDeduplicated}, 失败 ${result.totalFailed}`);
+        message.success(`Update complete: +${result.totalCreated}, deduplicated ${result.totalDeduplicated}, failed ${result.totalFailed}`);
       } else if (current === 'FAILED') {
-        message.error('更新失败，请重试');
+        message.error('Update failed. Please try again.');
       }
       void loadGraph();
     }
 
-    if (current === 'STOP_REQUESTED' && prev !== 'STOP_REQUESTED') {
-      message.info('已请求停止，将在当前文章后停止');
+    if (current === 'STOP_REQUESTED' && previous !== 'STOP_REQUESTED') {
+      message.info('Stop requested. The crawler will stop after the current article.');
     }
 
     lastCrawlStateRef.current = current;
@@ -108,30 +107,32 @@ export const KnowledgeGraph: React.FC<KnowledgeGraphProps> = ({ crawlStatus, ref
       await loadGraph();
       return;
     }
+
     try {
       const results = await knowledgeApi.searchNodes(value);
       if (results.length > 0) {
-        const found = nodes.find(n => results.some(r => r.id === n.id));
+        const found = nodes.find(node => results.some(result => result.id === node.id));
         if (found) {
           setSelectedNode(found);
-          // 可以将视角平移到找到的节点
           setOffset({
             x: -found.positionX * scale + (svgRef.current?.clientWidth || 0) / 2,
             y: -found.positionY * scale + (svgRef.current?.clientHeight || 0) / 2
           });
         } else {
-          message.warning('没找到节点');
+          message.warning('No matching node was found.');
         }
       } else {
-        message.warning('没找到节点');
+        message.warning('No matching node was found.');
       }
     } catch {
-      // NOTE: silent failure
+      // Keep the current graph state on search failures.
     }
   };
 
   const handleManualUpdate = async () => {
-    if (actionPending) return;
+    if (actionPending) {
+      return;
+    }
 
     setActionPending(true);
     try {
@@ -140,14 +141,14 @@ export const KnowledgeGraph: React.FC<KnowledgeGraphProps> = ({ crawlStatus, ref
       } else {
         const status = await resourceApi.startCrawlUpdate();
         if (status.state === 'RUNNING' || status.state === 'STOP_REQUESTED') {
-          message.info('开始请求爬虫更新数据...');
+          message.info('Crawler update started...');
         } else {
-          message.info(status.message || '更新任务已在运行中');
+          message.info(status.message || 'An update task is already running.');
         }
       }
       await refreshCrawlStatus?.();
     } catch {
-      message.error(isCrawling ? '请求停止失败' : '开始更新失败');
+      message.error(isCrawling ? 'Failed to stop the crawler update.' : 'Failed to start the crawler update.');
     } finally {
       setActionPending(false);
     }
@@ -157,57 +158,59 @@ export const KnowledgeGraph: React.FC<KnowledgeGraphProps> = ({ crawlStatus, ref
     try {
       await knowledgeExcelApi.downloadTemplate();
     } catch {
-      message.error('模板下载失败，请重试');
+      message.error('Failed to download the template. Please try again.');
     }
   };
 
-  const handleExcelImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    e.target.value = '';
+  const handleExcelImport = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) {
+      return;
+    }
 
+    event.target.value = '';
     setExcelImporting(true);
-    const hide = message.loading('正在导入 Excel...', 0);
+    const hide = message.loading('Importing Excel...', 0);
     try {
       const result = await knowledgeExcelApi.importFromExcel(file);
       hide();
-      message.success(`导入完成：创建 ${result.createdNodeCount} 个节点、${result.createdRelationCount} 条关系`);
+      message.success(`Import complete: ${result.createdNodeCount} nodes created, ${result.createdRelationCount} relations created.`);
       await loadGraph();
     } catch {
       hide();
-      message.error('Excel 导入失败，请检查文件格式');
+      message.error('Excel import failed. Please check the file format.');
     } finally {
       setExcelImporting(false);
     }
   };
 
-  const handleWheel = useCallback((e: React.WheelEvent) => {
-    e.preventDefault();
-    const delta = e.deltaY > 0 ? 0.9 : 1.1;
-    setScale(prev => Math.min(Math.max(prev * delta, 0.3), 3));
+  const handleWheel = useCallback((event: React.WheelEvent) => {
+    event.preventDefault();
+    const delta = event.deltaY > 0 ? 0.9 : 1.1;
+    setScale(previous => Math.min(Math.max(previous * delta, 0.3), 3));
   }, []);
 
-  const handleMouseDown = useCallback((e: React.MouseEvent) => {
-    if (e.target === svgRef.current || (e.target as Element).tagName === 'line') {
+  const handleMouseDown = useCallback((event: React.MouseEvent) => {
+    if (event.target === svgRef.current || (event.target as Element).tagName === 'line') {
       setIsPanning(true);
-      setPanStart({ x: e.clientX - offset.x, y: e.clientY - offset.y });
+      setPanStart({ x: event.clientX - offset.x, y: event.clientY - offset.y });
     }
   }, [offset]);
 
-  const handleMouseMove = useCallback((e: React.MouseEvent) => {
+  const handleMouseMove = useCallback((event: React.MouseEvent) => {
     if (isPanning) {
-      setOffset({ x: e.clientX - panStart.x, y: e.clientY - panStart.y });
+      setOffset({ x: event.clientX - panStart.x, y: event.clientY - panStart.y });
     }
 
     if (draggingNodeId !== null) {
-      const dx = (e.clientX - dragStart.x) / scale;
-      const dy = (e.clientY - dragStart.y) / scale;
-      setDragStart({ x: e.clientX, y: e.clientY });
-      setNodes(prev =>
-        prev.map(n =>
-          n.id === draggingNodeId
-            ? { ...n, positionX: n.positionX + dx, positionY: n.positionY + dy }
-            : n
+      const dx = (event.clientX - dragStart.x) / scale;
+      const dy = (event.clientY - dragStart.y) / scale;
+      setDragStart({ x: event.clientX, y: event.clientY });
+      setNodes(previous =>
+        previous.map(node =>
+          node.id === draggingNodeId
+            ? { ...node, positionX: node.positionX + dx, positionY: node.positionY + dy }
+            : node
         )
       );
     }
@@ -215,28 +218,30 @@ export const KnowledgeGraph: React.FC<KnowledgeGraphProps> = ({ crawlStatus, ref
 
   const handleMouseUp = useCallback(() => {
     if (draggingNodeId !== null) {
-      const node = nodes.find(n => n.id === draggingNodeId);
+      const node = nodes.find(item => item.id === draggingNodeId);
       if (node) {
-        knowledgeApi.updateNodePosition(node.id, node.positionX, node.positionY).catch(() => { });
+        knowledgeApi.updateNodePosition(node.id, node.positionX, node.positionY).catch(() => {});
       }
     }
     setIsPanning(false);
     setDraggingNodeId(null);
   }, [draggingNodeId, nodes]);
 
-  const handleNodeMouseDown = useCallback((e: React.MouseEvent, nodeId: number) => {
-    e.stopPropagation();
+  const handleNodeMouseDown = useCallback((event: React.MouseEvent, nodeId: number) => {
+    event.stopPropagation();
     setDraggingNodeId(nodeId);
-    setDragStart({ x: e.clientX, y: e.clientY });
+    setDragStart({ x: event.clientX, y: event.clientY });
   }, []);
 
   const getNodePosition = (nodeId: number) => {
-    const node = nodes.find(n => n.id === nodeId);
+    const node = nodes.find(item => item.id === nodeId);
     return node ? { x: node.positionX, y: node.positionY } : null;
   };
 
   const handleAddRelation = async () => {
-    if (!selectedNode || addingRelation) return;
+    if (!selectedNode || addingRelation) {
+      return;
+    }
 
     try {
       const values = await relationForm.validateFields();
@@ -246,12 +251,10 @@ export const KnowledgeGraph: React.FC<KnowledgeGraphProps> = ({ crawlStatus, ref
         values.targetNodeId,
         values.relationType
       );
-      setConnections(prev => [...prev, newRelation]);
+      setConnections(previous => [...previous, newRelation]);
       setShowAddRelation(false);
       relationForm.resetFields();
-      message.success('添加关系成功');
-    } catch (e) {
-      // ignore
+      message.success('Relation added successfully.');
     } finally {
       setAddingRelation(false);
     }
@@ -262,7 +265,7 @@ export const KnowledgeGraph: React.FC<KnowledgeGraphProps> = ({ crawlStatus, ref
       <div style={{ display: 'flex', flex: 1, alignItems: 'center', justifyContent: 'center', height: '100%' }}>
         <Space direction="vertical" align="center">
           <Spin size="large" />
-          <Text type="secondary">加载知识图谱...</Text>
+          <Text type="secondary">Loading knowledge graph...</Text>
         </Space>
       </div>
     );
@@ -270,28 +273,35 @@ export const KnowledgeGraph: React.FC<KnowledgeGraphProps> = ({ crawlStatus, ref
 
   return (
     <div style={{ flex: 1, height: '100%', position: 'relative', overflow: 'hidden', display: 'flex' }}>
-      
-      {/* 顶部操作区 */}
       <div style={{ position: 'absolute', top: 16, left: 16, zIndex: 10, display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
         <Input.Search
-          placeholder="搜索节点..."
+          placeholder="Search nodes..."
           allowClear
           onSearch={handleSearch}
           value={searchKeyword}
-          onChange={e => setSearchKeyword(e.target.value)}
+          onChange={event => setSearchKeyword(event.target.value)}
           style={{ width: 220, borderRadius: 8, boxShadow: '0 2px 8px rgba(0,0,0,0.05)' }}
         />
 
         <Space.Compact style={{ boxShadow: '0 2px 8px rgba(0,0,0,0.05)', borderRadius: 8 }}>
-          <Button icon={<PlusOutlined />} onClick={() => setScale(s => Math.min(s * 1.2, 3))} />
-          <span style={{ 
-            display: 'inline-flex', alignItems: 'center', justifyContent: 'center', 
-            background: '#fff', borderTop: '1px solid #d9d9d9', borderBottom: '1px solid #d9d9d9',
-            padding: '0 8px', fontSize: 13, minWidth: 50, color: '#595959' 
-          }}>
+          <Button icon={<PlusOutlined />} onClick={() => setScale(value => Math.min(value * 1.2, 3))} />
+          <span
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              background: '#fff',
+              borderTop: '1px solid #d9d9d9',
+              borderBottom: '1px solid #d9d9d9',
+              padding: '0 8px',
+              fontSize: 13,
+              minWidth: 50,
+              color: '#595959'
+            }}
+          >
             {Math.round(scale * 100)}%
           </span>
-          <Button icon={<MinusOutlined />} onClick={() => setScale(s => Math.max(s * 0.8, 0.3))} />
+          <Button icon={<MinusOutlined />} onClick={() => setScale(value => Math.max(value * 0.8, 0.3))} />
         </Space.Compact>
 
         <Button
@@ -300,21 +310,21 @@ export const KnowledgeGraph: React.FC<KnowledgeGraphProps> = ({ crawlStatus, ref
           loading={actionPending}
           style={{ boxShadow: '0 2px 8px rgba(0,0,0,0.05)' }}
         >
-          {isCrawling ? '停止更新' : '自动更新爬虫'}
+          {isCrawling ? 'Stop Update' : 'Run Crawler Update'}
         </Button>
 
         {crawlStatus && isCrawling && (
           <Tag color="processing" style={{ margin: 0 }}>
-            状态: {crawlState}{crawlStatus.currentSite ? ` | ${crawlStatus.currentSite}` : ''}
+            Status: {crawlState}{crawlStatus.currentSite ? ` | ${crawlStatus.currentSite}` : ''}
           </Tag>
         )}
 
         <Space.Compact style={{ boxShadow: '0 2px 8px rgba(0,0,0,0.05)', borderRadius: 8 }}>
-          <Tooltip title="下载 Excel 模板">
-            <Button icon={<DownloadOutlined style={{ color: '#52c41a' }} />} onClick={handleDownloadTemplate}>模板</Button>
+          <Tooltip title="Download Excel template">
+            <Button icon={<DownloadOutlined style={{ color: '#52c41a' }} />} onClick={handleDownloadTemplate}>Template</Button>
           </Tooltip>
-          <Tooltip title="从 Excel 导入">
-            <Button icon={<UploadOutlined style={{ color: '#1677ff' }} />} onClick={() => excelInputRef.current?.click()} loading={excelImporting}>导入</Button>
+          <Tooltip title="Import from Excel">
+            <Button icon={<UploadOutlined style={{ color: '#1677ff' }} />} onClick={() => excelInputRef.current?.click()} loading={excelImporting}>Import</Button>
           </Tooltip>
           <input ref={excelInputRef} type="file" accept=".xlsx,.xls" onChange={handleExcelImport} style={{ display: 'none' }} />
         </Space.Compact>
@@ -322,23 +332,24 @@ export const KnowledgeGraph: React.FC<KnowledgeGraphProps> = ({ crawlStatus, ref
         <div style={{ display: 'flex', gap: 12, background: '#fff', padding: '6px 12px', borderRadius: 8, border: '1px solid #d9d9d9', boxShadow: '0 2px 8px rgba(0,0,0,0.05)' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <div style={{ width: 12, height: 12, borderRadius: 2, background: NODE_TYPE_COLORS.TECH.border }} />
-            <Text type="secondary" style={{ fontSize: 13 }}>技术</Text>
+            <Text type="secondary" style={{ fontSize: 13 }}>Technology</Text>
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <div style={{ width: 12, height: 12, borderRadius: 2, background: NODE_TYPE_COLORS.IDEO.border }} />
-            <Text type="secondary" style={{ fontSize: 13 }}>思政</Text>
+            <Text type="secondary" style={{ fontSize: 13 }}>Ideology</Text>
           </div>
         </div>
       </div>
 
-      {/* SVG 画布 */}
       <svg
         ref={svgRef}
         className="graph-pattern"
-        style={{ 
-          flex: 1, height: '100%', width: '100%', 
-          backgroundColor: 'var(--bg-light)', 
-          cursor: isPanning ? 'grabbing' : 'grab' 
+        style={{
+          flex: 1,
+          height: '100%',
+          width: '100%',
+          backgroundColor: 'var(--bg-light)',
+          cursor: isPanning ? 'grabbing' : 'grab'
         }}
         onWheel={handleWheel}
         onMouseDown={handleMouseDown}
@@ -347,16 +358,18 @@ export const KnowledgeGraph: React.FC<KnowledgeGraphProps> = ({ crawlStatus, ref
         onMouseLeave={handleMouseUp}
       >
         <g transform={`translate(${offset.x}, ${offset.y}) scale(${scale})`}>
-          {connections.map((conn) => {
-            const from = getNodePosition(conn.fromNodeId);
-            const to = getNodePosition(conn.toNodeId);
-            if (!from || !to) return null;
+          {connections.map(connection => {
+            const from = getNodePosition(connection.fromNodeId);
+            const to = getNodePosition(connection.toNodeId);
+            if (!from || !to) {
+              return null;
+            }
 
-            const lineColor = getRelationColor(conn.relationType);
-            const isDashed = conn.lineStyle === 'DASHED';
+            const lineColor = getRelationColor(connection.relationType);
+            const isDashed = connection.lineStyle === 'DASHED';
 
             return (
-              <g key={conn.id}>
+              <g key={connection.id}>
                 <line
                   x1={from.x} y1={from.y} x2={to.x} y2={to.y}
                   stroke={lineColor} strokeWidth={1.5}
@@ -367,24 +380,24 @@ export const KnowledgeGraph: React.FC<KnowledgeGraphProps> = ({ crawlStatus, ref
                   x={(from.x + to.x) / 2} y={(from.y + to.y) / 2 - 6}
                   textAnchor="middle" fill={lineColor} fontSize={10} fontWeight="500" opacity={0.8}
                 >
-                  {conn.relationType}
+                  {connection.relationType}
                 </text>
               </g>
             );
           })}
 
-          {nodes.map((node) => {
+          {nodes.map(node => {
             const color = getNodeColor(node.nodeType);
             const isSelected = selectedNode?.id === node.id;
             const isHighlighted = highlightNodeIds.includes(node.id);
             const size = node.nodeSize === 'LG' ? NODE_SIZE * 1.3 : node.nodeSize === 'SM' ? NODE_SIZE * 0.8 : NODE_SIZE;
-            
+
             return (
               <g
                 key={node.id}
                 transform={`translate(${node.positionX - size / 2}, ${node.positionY - size / 2})`}
-                onClick={(e) => { e.stopPropagation(); setSelectedNode(node); }}
-                onMouseDown={(e) => handleNodeMouseDown(e, node.id)}
+                onClick={event => { event.stopPropagation(); setSelectedNode(node); }}
+                onMouseDown={event => handleNodeMouseDown(event, node.id)}
                 style={{ cursor: 'pointer' }}
               >
                 {isHighlighted && <rect x={-6} y={-6} width={size + 12} height={size + 12} rx={20} fill="rgba(250,173,20,0.15)" stroke="#faad14" strokeWidth={2} strokeDasharray="5,3" />}
@@ -392,7 +405,7 @@ export const KnowledgeGraph: React.FC<KnowledgeGraphProps> = ({ crawlStatus, ref
                 <rect
                   width={size} height={size} rx={14}
                   fill={color.bg}
-                  stroke={isSelected ? color.border : color.border}
+                  stroke={color.border}
                   strokeWidth={isSelected ? 3 : 1.5}
                 />
                 {node.icon && (
@@ -408,7 +421,7 @@ export const KnowledgeGraph: React.FC<KnowledgeGraphProps> = ({ crawlStatus, ref
                   textAnchor="middle" fill={color.text} fontSize={11} fontWeight="600"
                   style={{ userSelect: 'none' }}
                 >
-                  {node.name?.length > 4 ? node.name.slice(0, 4) + '...' : node.name}
+                  {node.name?.length > 4 ? `${node.name.slice(0, 4)}...` : node.name}
                 </text>
               </g>
             );
@@ -416,12 +429,11 @@ export const KnowledgeGraph: React.FC<KnowledgeGraphProps> = ({ crawlStatus, ref
         </g>
         {nodes.length === 0 && (
           <text x="50%" y="50%" textAnchor="middle" fill="#bfbfbf" fontSize={14}>
-            暂无知识图谱数据
+            No knowledge graph data
           </text>
         )}
       </svg>
 
-      {/* 右侧边栏包裹通过 Drawer 呈现 */}
       <Drawer
         title={
           <div>
@@ -446,7 +458,6 @@ export const KnowledgeGraph: React.FC<KnowledgeGraphProps> = ({ crawlStatus, ref
       >
         {selectedNode && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-            
             {selectedNode.technicalDefinition && (
               <div>
                 <Text type="secondary" style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 4 }}>
@@ -477,30 +488,38 @@ export const KnowledgeGraph: React.FC<KnowledgeGraphProps> = ({ crawlStatus, ref
               <Text type="secondary" style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', marginBottom: 8, display: 'block' }}>Linked Nodes</Text>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {connections
-                  .filter(c => c.fromNodeId === selectedNode.id || c.toNodeId === selectedNode.id)
-                  .map(c => {
-                    const linkedId = c.fromNodeId === selectedNode.id ? c.toNodeId : c.fromNodeId;
-                    const linkedNode = nodes.find(n => n.id === linkedId);
-                    if (!linkedNode) return null;
+                  .filter(connection => connection.fromNodeId === selectedNode.id || connection.toNodeId === selectedNode.id)
+                  .map(connection => {
+                    const linkedId = connection.fromNodeId === selectedNode.id ? connection.toNodeId : connection.fromNodeId;
+                    const linkedNode = nodes.find(node => node.id === linkedId);
+                    if (!linkedNode) {
+                      return null;
+                    }
                     return (
                       <div
-                        key={c.id}
+                        key={connection.id}
                         onClick={() => setSelectedNode(linkedNode)}
                         style={{
-                          display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px',
-                          border: '1px solid #f0f0f0', borderRadius: 8, cursor: 'pointer',
-                          background: '#fafafa', transition: 'all 0.2s'
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 8,
+                          padding: '8px 12px',
+                          border: '1px solid #f0f0f0',
+                          borderRadius: 8,
+                          cursor: 'pointer',
+                          background: '#fafafa',
+                          transition: 'all 0.2s'
                         }}
                       >
                         <div style={{ width: 10, height: 10, borderRadius: '50%', background: getNodeColor(linkedNode.nodeType).border }} />
                         <Text style={{ fontSize: 14, flex: 1 }} ellipsis>{linkedNode.name}</Text>
-                        <Tag color="default" style={{ margin: 0, border: 'none', background: getRelationColor(c.relationType) + '20', color: getRelationColor(c.relationType) }}>
-                          {c.relationType}
+                        <Tag color="default" style={{ margin: 0, border: 'none', background: `${getRelationColor(connection.relationType)}20`, color: getRelationColor(connection.relationType) }}>
+                          {connection.relationType}
                         </Tag>
                       </div>
                     );
                   })}
-                {connections.filter(c => c.fromNodeId === selectedNode.id || c.toNodeId === selectedNode.id).length === 0 && (
+                {connections.filter(connection => connection.fromNodeId === selectedNode.id || connection.toNodeId === selectedNode.id).length === 0 && (
                   <Text type="secondary" style={{ fontSize: 13 }}>No linked nodes</Text>
                 )}
               </div>
@@ -522,10 +541,6 @@ export const KnowledgeGraph: React.FC<KnowledgeGraphProps> = ({ crawlStatus, ref
                 <Text type="secondary" style={{ fontSize: 12, fontWeight: 700, marginBottom: 12, display: 'block' }}>New Relation</Text>
                 <Form.Item name="relationType" label="Relation Type" rules={[{ required: true }]} initialValue={RELATION_TYPES[0]}>
                   <Select
-                    /**
-                     * antd v6 推荐使用 options 数据源，而不是 Select.Option 子组件。
-                     * 这样可以避免类型推断分歧，并统一与下方 Target Node 的写法。
-                     */
                     options={RELATION_TYPES.map(type => ({ label: type, value: type }))}
                   />
                 </Form.Item>
@@ -537,9 +552,9 @@ export const KnowledgeGraph: React.FC<KnowledgeGraphProps> = ({ crawlStatus, ref
                     filterOption={(input, option) =>
                       (option?.label ?? '').toString().toLowerCase().includes(input.toLowerCase())
                     }
-                    options={nodes.filter(n => n.id !== selectedNode.id).map(n => ({
-                      value: n.id,
-                      label: n.name
+                    options={nodes.filter(node => node.id !== selectedNode.id).map(node => ({
+                      value: node.id,
+                      label: node.name
                     }))}
                   />
                 </Form.Item>

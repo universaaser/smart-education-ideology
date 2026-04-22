@@ -24,8 +24,14 @@ E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\crawler\rul
 E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\crawler\rule\impl\CpcPeopleCrawlRule.java
 E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\crawler\rule\impl\JhsjkPeopleCrawlRule.java
 E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\dto\AuthBootstrapResponse.java
+E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\dto\AuthLoginRequestDto.java
+E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\dto\AuthRegisterRequestDto.java
 E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\dto\ChatCitationDto.java
+E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\dto\ChatMessageRequestDto.java
 E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\dto\ChatResponseDto.java
+E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\dto\ChatSessionCreateRequestDto.java
+E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\dto\CourseCreateRequestDto.java
+E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\dto\CourseTeachingMaterialGroupDto.java
 E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\dto\DocumentStructureDto.java
 E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\dto\IdeologyMatchDto.java
 E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\dto\KnowledgeContextItem.java
@@ -33,7 +39,10 @@ E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\dto\Knowled
 E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\dto\KnowledgePointDto.java
 E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\dto\KnowledgeRetrievalResult.java
 E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\dto\MaterialVersionItemDto.java
+E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\dto\NodePositionUpdateRequestDto.java
+E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\dto\PathRecommendRequestDto.java
 E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\dto\PipelineResultDto.java
+E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\dto\ResourceManualCrawlRequestDto.java
 E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\dto\RoleUiConfig.java
 E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\dto\SelectionExplainEvidenceDto.java
 E:\study\smart-education-ideology\backend\src\main\java\com\smartedu\dto\SelectionExplainHistoryDto.java

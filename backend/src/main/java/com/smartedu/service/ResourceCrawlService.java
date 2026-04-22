@@ -48,6 +48,18 @@ public class ResourceCrawlService {
     private static final int CONTENT_FOR_AI_MAX_LENGTH = 2200;
     private static final int MIN_CONTENT_LENGTH = 80;
     private static final String DEFAULT_CATEGORY = "\u65f6\u653f\u8d44\u8baf";
+    private static final String EMPTY_TAGS_JSON = "[]";
+    private static final List<String> ALLOWED_IDEOLOGY_TAGS = List.of(
+            "\u5de5\u5320\u7cbe\u795e",
+            "\u4ea7\u4e1a\u521b\u65b0",
+            "\u79d1\u6280\u62a5\u56fd",
+            "\u5bb6\u56fd\u60c5\u6000",
+            "\u8d23\u4efb\u62c5\u5f53",
+            "\u7eff\u8272\u53d1\u5c55",
+            "\u4f9d\u6cd5\u6cbb\u7406",
+            "\u804c\u4e1a\u64cd\u5b88",
+            "\u534f\u540c\u5171\u6cbb",
+            "\u6587\u5316\u81ea\u4fe1");
 
     private static final Pattern JSON_OBJECT_PATTERN = Pattern.compile("\\{[\\s\\S]*}");
 
@@ -124,6 +136,7 @@ public class ResourceCrawlService {
 
         try {
             List<CrawlResult.SiteStat> siteStats = new ArrayList<>();
+            Set<String> seenArticleFingerprints = new LinkedHashSet<>();
 
             for (CrawlSiteRule rule : crawlSiteRules) {
                 if (shouldStopBeforeNextItem()) {
@@ -131,7 +144,11 @@ public class ResourceCrawlService {
                 }
 
                 setCurrentSite(rule.getSiteName());
-                CrawlResult.SiteStat stat = crawlSingleSite(rule, TARGET_CREATED_PER_SITE, CANDIDATE_LIMIT_PER_SITE);
+                CrawlResult.SiteStat stat = crawlSingleSite(
+                        rule,
+                        TARGET_CREATED_PER_SITE,
+                        CANDIDATE_LIMIT_PER_SITE,
+                        seenArticleFingerprints);
                 siteStats.add(stat);
                 mergeResult(result, stat);
             }
@@ -177,7 +194,11 @@ public class ResourceCrawlService {
         }
     }
 
-    private CrawlResult.SiteStat crawlSingleSite(CrawlSiteRule rule, int targetCreatedCount, int candidateLimitPerSite) {
+    private CrawlResult.SiteStat crawlSingleSite(
+            CrawlSiteRule rule,
+            int targetCreatedCount,
+            int candidateLimitPerSite,
+            Set<String> seenArticleFingerprints) {
         CrawlResult.SiteStat stat = new CrawlResult.SiteStat();
         stat.setSiteName(rule.getSiteName());
         stat.setListUrl(rule.getListUrl());
@@ -215,6 +236,13 @@ public class ResourceCrawlService {
                         continue;
                     }
 
+                    String articleFingerprint = buildArticleFingerprint(cleaned);
+                    if (resourceService.existsByTitle(cleaned.getTitle())
+                            || (!articleFingerprint.isBlank() && seenArticleFingerprints.contains(articleFingerprint))) {
+                        stat.setDeduplicatedCount(stat.getDeduplicatedCount() + 1);
+                        continue;
+                    }
+
                     stat.setParsedCount(stat.getParsedCount() + 1);
 
                     CrawledArticleProcessed processed = processWithAi(cleaned);
@@ -225,6 +253,9 @@ public class ResourceCrawlService {
                     Resource resource = toResource(processed);
                     Resource createdResource = resourceService.createResource(resource);
                     knowledgeIngestionService.ingestResource(createdResource);
+                    if (!articleFingerprint.isBlank()) {
+                        seenArticleFingerprints.add(articleFingerprint);
+                    }
                     stat.setCreatedCount(stat.getCreatedCount() + 1);
 
                 } catch (DuplicateKeyException duplicateKeyException) {
@@ -273,11 +304,14 @@ public class ResourceCrawlService {
         try {
             String systemPrompt = "You are a curriculum-ideology analysis assistant. "
                     + "Ignore webpage boilerplate such as login, subscribe, footer links, copyright, and navigation text. "
-                    + "Return strict JSON with fields: subject_summary, matched_ideology_categories, match_reason. "
+                    + "Return one JSON object only with fields: subject_summary, matched_ideology_categories, match_reason. "
                     + "subject_summary must be a concise factual abstract under 180 Chinese characters. "
-                    + "matched_ideology_categories must be an array and only use these values: "
+                    + "matched_ideology_categories must be an array and may only use these values: "
                     + "工匠精神, 产业创新, 科技报国, 家国情怀, 责任担当, 绿色发展, 依法治理, 职业操守, 协同共治, 文化自信. "
-                    + "match_reason must explain why the subject knowledge matches the selected ideology categories.";
+                    + "match_reason must explain why the subject knowledge matches the selected ideology categories. "
+                    + "Use the following corrected ideology categories exactly: "
+                    + String.join(", ", ALLOWED_IDEOLOGY_TAGS) + ". "
+                    + "If there is not enough evidence for ideology tagging, return an empty array.";
 
             String userPrompt = "Title: " + raw.getTitle() + "\n"
                     + "Source: " + raw.getSiteName() + "\n"
@@ -307,13 +341,8 @@ public class ResourceCrawlService {
         String summary = safeText(root.path("subject_summary"));
         String ideologySummary = safeText(root.path("match_reason"));
 
-        String storedSummary = buildStoredSummary(raw.getTitle(), summary, ideologySummary);
-
-        if (ideologySummary.isBlank()) {
-            ideologySummary = storedSummary;
-        }
-
-        String tagsJson = buildTagsJson(root.path("matched_ideology_categories"), raw.getSiteName());
+        String storedSummary = buildStoredSummary(raw.getTitle(), summary, buildExcerpt(raw.getContent()));
+        String tagsJson = buildTagsJson(root.path("matched_ideology_categories"));
 
         return new CrawledArticleProcessed(
                 raw.getTitle(),
@@ -337,19 +366,20 @@ public class ResourceCrawlService {
             tagsJson = "[\"工匠精神\",\"责任担当\"]";
         }
 
-        String fallbackSummary = buildStoredSummary(raw.getTitle(), "", "");
+        tagsJson = EMPTY_TAGS_JSON;
+        String fallbackSummary = buildStoredSummary(raw.getTitle(), "", buildExcerpt(raw.getContent()));
 
         return new CrawledArticleProcessed(
                 raw.getTitle(),
                 raw.getSiteName(),
                 raw.getSourceUrl(),
                 fallbackSummary,
-                fallbackSummary,
+                "",
                 tagsJson,
                 false);
     }
 
-    private String buildTagsJson(JsonNode tagNode, String siteName) throws JsonProcessingException {
+    private String buildTagsJson(JsonNode tagNode) throws JsonProcessingException {
         LinkedHashSet<String> tags = new LinkedHashSet<>();
 
         if (tagNode != null && tagNode.isArray()) {
@@ -372,15 +402,20 @@ public class ResourceCrawlService {
             }
         }
 
-        if (tags.isEmpty()) {
+        if (false && tags.isEmpty()) {
             tags.add("工匠精神");
             tags.add("责任担当");
         }
 
         List<String> finalTags = tags.stream()
+                .map(this::canonicalizeIdeologyTag)
                 .filter(tag -> !tag.isBlank())
                 .limit(6)
                 .toList();
+
+        if (finalTags.isEmpty()) {
+            return EMPTY_TAGS_JSON;
+        }
 
         if (finalTags.isEmpty()) {
             return "[\"工匠精神\"]";
@@ -402,15 +437,52 @@ public class ResourceCrawlService {
         }
         return cleaned;
     }
-    private String buildStoredSummary(String title, String summary, String ideologySummary) {
+
+    private String canonicalizeIdeologyTag(String tag) {
+        String cleaned = sanitizeTag(tag);
+        if (cleaned.isBlank()) {
+            return "";
+        }
+
+        for (String allowedTag : ALLOWED_IDEOLOGY_TAGS) {
+            if (cleaned.equals(allowedTag) || cleaned.contains(allowedTag) || allowedTag.contains(cleaned)) {
+                return allowedTag;
+            }
+        }
+        return "";
+    }
+
+    private String buildStoredSummary(String title, String summary, String fallbackText) {
         String candidate = normalizeWhitespace(summary);
         if (candidate.isBlank()) {
-            candidate = normalizeWhitespace(ideologySummary);
+            candidate = normalizeWhitespace(fallbackText);
         }
         if (candidate.isBlank()) {
             candidate = "Summary pending for: " + normalizeWhitespace(title);
         }
         return truncate(candidate, EXCERPT_MAX_LENGTH);
+    }
+
+    private String buildArticleFingerprint(CrawledArticleRaw raw) {
+        if (raw == null) {
+            return "";
+        }
+
+        String normalizedTitle = normalizeFingerprintText(raw.getTitle());
+        String normalizedContent = normalizeFingerprintText(raw.getContent());
+        if (normalizedContent.length() > 200) {
+            normalizedContent = normalizedContent.substring(0, 200);
+        }
+        if (normalizedTitle.isBlank() && normalizedContent.isBlank()) {
+            return "";
+        }
+        return normalizedTitle + "|" + normalizedContent;
+    }
+
+    private String normalizeFingerprintText(String text) {
+        return normalizeWhitespace(text)
+                .toLowerCase(Locale.ROOT)
+                .replaceAll("[^\\p{L}\\p{N}]+", "");
     }
 
     private String extractJsonObject(String text) {

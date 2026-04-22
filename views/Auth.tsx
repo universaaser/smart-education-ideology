@@ -22,12 +22,6 @@ interface FormValues {
   role: RoleKey;
 }
 
-/**
- * 登录 / 注册页
- *
- * NOTE: 使用 Ant Design Form 替换手写 form，享受表单校验和字段联动能力。
- * Segmented 替换登录/注册切换按钮，Radio.Group 替换角色选择按钮。
- */
 export const Auth: React.FC = () => {
   const { login } = useAuth();
   const [form] = Form.useForm<FormValues>();
@@ -35,12 +29,10 @@ export const Auth: React.FC = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
 
-  /** 切换登录/注册 Tab 时重置表单和错误 */
-  const handleTabChange = (val: string) => {
-    setTab(val as TabKey);
+  const handleTabChange = (value: string) => {
+    setTab(value as TabKey);
     setErrorMsg('');
     form.resetFields();
-    // 注册时默认角色为 TEACHER
     form.setFieldValue('role', 'TEACHER');
   };
 
@@ -62,11 +54,10 @@ export const Auth: React.FC = () => {
         setToken(result.token);
       }
 
-      // 成功获取 token 后通过 bootstrap 接口拉取完整用户数据
       const bootstrapData = await authApi.bootstrap();
       login(bootstrapData);
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : '操作失败，请重试';
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'The action failed. Please try again.';
       setErrorMsg(message);
     } finally {
       setIsLoading(false);
@@ -74,58 +65,76 @@ export const Auth: React.FC = () => {
   };
 
   return (
-    <div style={{
-      minHeight: '100vh',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      background: 'var(--bg-light)',
-      position: 'relative',
-      overflow: 'hidden',
-    }}>
-      {/* 背景装饰光晕 */}
-      <div style={{
-        position: 'absolute', top: -96, left: -96,
-        width: 384, height: 384,
-        background: 'rgba(22,119,255,0.06)', borderRadius: '50%', filter: 'blur(60px)',
-        pointerEvents: 'none',
-      }} />
-      <div style={{
-        position: 'absolute', top: '50%', right: -96,
-        width: 256, height: 256,
-        background: 'rgba(239,68,68,0.05)', borderRadius: '50%', filter: 'blur(60px)',
-        pointerEvents: 'none',
-      }} />
+    <div
+      style={{
+        minHeight: '100vh',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        background: 'var(--bg-light)',
+        position: 'relative',
+        overflow: 'hidden',
+      }}
+    >
+      <div
+        style={{
+          position: 'absolute',
+          top: -96,
+          left: -96,
+          width: 384,
+          height: 384,
+          background: 'rgba(22,119,255,0.06)',
+          borderRadius: '50%',
+          filter: 'blur(60px)',
+          pointerEvents: 'none',
+        }}
+      />
+      <div
+        style={{
+          position: 'absolute',
+          top: '50%',
+          right: -96,
+          width: 256,
+          height: 256,
+          background: 'rgba(239,68,68,0.05)',
+          borderRadius: '50%',
+          filter: 'blur(60px)',
+          pointerEvents: 'none',
+        }}
+      />
 
       <div style={{ width: '100%', maxWidth: 420, padding: '0 20px', position: 'relative', zIndex: 1 }}>
-        {/* Logo 区 */}
         <div style={{ textAlign: 'center', marginBottom: 32 }}>
-          <div style={{
-            width: 64, height: 64,
-            background: 'var(--color-primary)',
-            borderRadius: 16,
-            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-            boxShadow: '0 8px 32px rgba(22,119,255,0.4)',
-            marginBottom: 16,
-          }}>
+          <div
+            style={{
+              width: 64,
+              height: 64,
+              background: 'var(--color-primary)',
+              borderRadius: 16,
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              boxShadow: '0 8px 32px rgba(22,119,255,0.4)',
+              marginBottom: 16,
+            }}
+          >
             <span className="material-symbols-outlined" style={{ color: '#fff', fontSize: 32 }}>auto_awesome</span>
           </div>
           <Title level={2} style={{ margin: 0, fontFamily: "'Lexend', sans-serif", fontWeight: 700 }}>
-            智教思政
+            Smart Ideology Education
           </Title>
-          <Text type="secondary" style={{ fontSize: 13 }}>智慧教学辅助系统 · 登录入口</Text>
+          <Text type="secondary" style={{ fontSize: 13 }}>Teaching support platform · Account access</Text>
         </div>
 
         <Card
           style={{ borderRadius: 20, boxShadow: '0 8px 40px rgba(0,0,0,0.08)', border: '1px solid var(--color-border)' }}
           bodyStyle={{ padding: '28px 32px 24px' }}
         >
-          {/* 登录/注册切换 */}
           <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 24 }}>
             <Segmented
               options={[
-                { label: '登  录', value: 'login' },
-                { label: '注  册', value: 'register' },
+                { label: 'Login', value: 'login' },
+                { label: 'Register', value: 'register' },
               ]}
               value={tab}
               onChange={handleTabChange}
@@ -134,7 +143,6 @@ export const Auth: React.FC = () => {
             />
           </div>
 
-          {/* 错误提示 */}
           {errorMsg && (
             <Alert
               type="error"
@@ -151,7 +159,6 @@ export const Auth: React.FC = () => {
             initialValues={{ role: 'TEACHER' }}
             requiredMark={false}
           >
-            {/* 注册专属：角色选择 + 邮箱 */}
             {tab === 'register' && (
               <>
                 <Form.Item name="role">
@@ -161,30 +168,29 @@ export const Auth: React.FC = () => {
                         value="TEACHER"
                         style={{ flex: 1, textAlign: 'center', borderRadius: 8 }}
                       >
-                        <BookOutlined /> 教师注册
+                        <BookOutlined /> Teacher
                       </Radio.Button>
                       <Radio.Button
                         value="STUDENT"
                         style={{ flex: 1, textAlign: 'center', borderRadius: 8 }}
                       >
-                        <ReadOutlined /> 学生注册
+                        <ReadOutlined /> Student
                       </Radio.Button>
                     </Space>
                   </Radio.Group>
                 </Form.Item>
 
-                {/* 动态 label：教师用"教工邮箱"，学生用"联系邮箱" */}
                 <Form.Item
-                  shouldUpdate={(prev, curr) => prev.role !== curr.role}
+                  shouldUpdate={(previous, current) => previous.role !== current.role}
                   noStyle
                 >
                   {({ getFieldValue }) => (
                     <Form.Item
-                      label={getFieldValue('role') === 'TEACHER' ? '教工邮箱' : '联系邮箱'}
+                      label={getFieldValue('role') === 'TEACHER' ? 'Work Email' : 'Contact Email'}
                       name="email"
                       rules={[
-                        { required: true, message: '请输入邮箱' },
-                        { type: 'email', message: '邮箱格式不正确' },
+                        { required: true, message: 'Please enter an email address' },
+                        { type: 'email', message: 'Please enter a valid email address' },
                       ]}
                     >
                       <Input
@@ -202,48 +208,45 @@ export const Auth: React.FC = () => {
               </>
             )}
 
-            {/* 用户名 */}
             <Form.Item
               label={
-                <Form.Item shouldUpdate={(p, c) => p.role !== c.role} noStyle>
+                <Form.Item shouldUpdate={(previous, current) => previous.role !== current.role} noStyle>
                   {({ getFieldValue }) =>
-                    getFieldValue('role') === 'TEACHER' ? '用户名 / 教工号' : '用户名 / 学号'
+                    getFieldValue('role') === 'TEACHER' ? 'Username / Staff ID' : 'Username / Student ID'
                   }
                 </Form.Item>
               }
               name="username"
-              rules={[{ required: true, message: '请输入用户名' }]}
+              rules={[{ required: true, message: 'Please enter a username' }]}
             >
               <Input
                 prefix={<UserOutlined style={{ color: 'var(--color-text-tertiary)' }} />}
-                placeholder="请输入您的账号"
+                placeholder="Enter your account"
                 size="large"
               />
             </Form.Item>
 
-            {/* 密码 */}
             <Form.Item
               label={
                 <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%' }}>
-                  <span>密码</span>
+                  <span>Password</span>
                   {tab === 'login' && (
                     <Button type="link" size="small" style={{ padding: 0, height: 'auto', fontSize: 12 }}>
-                      忘记密码?
+                      Forgot password?
                     </Button>
                   )}
                 </div>
               }
               name="password"
-              rules={[{ required: true, message: '请输入密码' }]}
+              rules={[{ required: true, message: 'Please enter a password' }]}
             >
               <Input.Password
                 prefix={<LockOutlined style={{ color: 'var(--color-text-tertiary)' }} />}
-                placeholder="••••••••"
+                placeholder="Enter your password"
                 size="large"
               />
             </Form.Item>
 
-            {/* 提交按钮 */}
             <Form.Item style={{ marginTop: 8, marginBottom: 0 }}>
               <Button
                 type="primary"
@@ -254,11 +257,14 @@ export const Auth: React.FC = () => {
                 icon={!isLoading ? <ArrowRightOutlined /> : undefined}
                 iconPosition="end"
                 style={{
-                  height: 48, borderRadius: 12, fontWeight: 700, fontSize: 15,
+                  height: 48,
+                  borderRadius: 12,
+                  fontWeight: 700,
+                  fontSize: 15,
                   boxShadow: '0 4px 16px rgba(22,119,255,0.35)',
                 }}
               >
-                {tab === 'login' ? '立即登录' : '创建账户'}
+                {tab === 'login' ? 'Sign In' : 'Create Account'}
               </Button>
             </Form.Item>
           </Form>
@@ -266,10 +272,10 @@ export const Auth: React.FC = () => {
 
         <Divider style={{ margin: '20px 0 0' }}>
           <Text type="secondary" style={{ fontSize: 11 }}>
-            登录即代表同意
-            <Button type="link" size="small" style={{ padding: '0 2px', fontSize: 11 }}>《服务协议》</Button>
-            与
-            <Button type="link" size="small" style={{ padding: '0 2px', fontSize: 11 }}>《隐私政策》</Button>
+            By continuing, you agree to the
+            <Button type="link" size="small" style={{ padding: '0 2px', fontSize: 11 }}>Terms of Service</Button>
+            and the
+            <Button type="link" size="small" style={{ padding: '0 2px', fontSize: 11 }}>Privacy Policy</Button>
           </Text>
         </Divider>
       </div>

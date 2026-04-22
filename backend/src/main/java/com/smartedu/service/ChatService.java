@@ -200,6 +200,10 @@ public class ChatService {
      */
     @Transactional
     public SelectionExplainResponse explainSelection(SelectionExplainRequestDto request) {
+        // Keep a service-layer guard so future internal callers cannot reintroduce a fallback user.
+        if (request == null || request.getUserId() == null) {
+            throw new IllegalArgumentException("User id cannot be empty");
+        }
         String selectionText = safe(request.getText()).trim();
         List<KnowledgeContextItem> contexts = knowledgeRetrievalService.retrieveContext(selectionText, 4, 3);
         List<SelectionExplainEvidenceDto> evidenceItems = contexts.stream()
@@ -239,7 +243,7 @@ public class ChatService {
         String modelReasoning = extractModelReasoning(answer);
 
         SelectionExplainRecord record = new SelectionExplainRecord();
-        record.setUserId(request.getUserId() == null ? 1L : request.getUserId());
+        record.setUserId(request.getUserId());
         record.setCourseId(request.getCourseId());
         record.setMaterialId(request.getMaterialId());
         record.setParseTaskId(request.getParseTaskId());
@@ -260,12 +264,6 @@ public class ChatService {
         response.setContexts(contexts);
         response.setCreatedAt(record.getCreatedAt());
         return response;
-    }
-
-    public SelectionExplainResponse explainSelection(String selectionText) {
-        SelectionExplainRequestDto request = new SelectionExplainRequestDto();
-        request.setText(selectionText);
-        return explainSelection(request);
     }
 
     public PageResult<SelectionExplainHistoryDto> getSelectionExplainHistory(

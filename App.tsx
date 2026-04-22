@@ -1,38 +1,52 @@
-import React from 'react';
+import React, { Suspense, lazy } from 'react';
 import { Spin } from 'antd';
-import { Auth } from './views/Auth';
-import { TeacherShell } from './layouts/TeacherShell';
-import { StudentShell } from './layouts/StudentShell';
 import { useAuth } from './contexts/AuthContext';
+
+const Auth = lazy(() => import('./views/Auth').then((module) => ({ default: module.Auth })));
+const TeacherShell = lazy(() => import('./layouts/TeacherShell').then((module) => ({ default: module.TeacherShell })));
+const StudentShell = lazy(() => import('./layouts/StudentShell').then((module) => ({ default: module.StudentShell })));
+
+const AppLoadingFallback = () => (
+  <div style={{
+    height: '100vh',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    background: 'var(--bg-light)',
+    flexDirection: 'column',
+    gap: 16,
+  }}>
+    <Spin size="large" />
+    <span style={{ color: '#94a3b8', fontSize: 13 }}>Loading...</span>
+  </div>
+);
 
 export default function App() {
   const { isLoading, isLoggedIn, roleUi } = useAuth();
 
   if (isLoading) {
-    return (
-      <div style={{
-        height: '100vh', display: 'flex',
-        alignItems: 'center', justifyContent: 'center',
-        background: 'var(--bg-light)',
-        flexDirection: 'column', gap: 16,
-      }}>
-        <Spin size="large" />
-        <span style={{ color: '#94a3b8', fontSize: 13 }}>加载中...</span>
-      </div>
-    );
+    return <AppLoadingFallback />;
   }
 
   if (!isLoggedIn) {
-    return <Auth />;
+    return (
+      <Suspense fallback={<AppLoadingFallback />}>
+        <Auth />
+      </Suspense>
+    );
   }
 
-  // 角色分流
   if (roleUi?.role === 'STUDENT') {
-    return <StudentShell />;
+    return (
+      <Suspense fallback={<AppLoadingFallback />}>
+        <StudentShell />
+      </Suspense>
+    );
   }
 
-  // 默认使用教师外壳（包括 ADMIN）
-  return <TeacherShell />;
+  return (
+    <Suspense fallback={<AppLoadingFallback />}>
+      <TeacherShell />
+    </Suspense>
+  );
 }
-
-

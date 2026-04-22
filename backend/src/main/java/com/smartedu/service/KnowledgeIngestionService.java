@@ -234,9 +234,24 @@ public class KnowledgeIngestionService {
     }
 
     private void createIdeologyMatches(SubjectKnowledge subjectKnowledge, List<IdeologyKnowledge> ideologies, String matchReason) {
-        if (subjectKnowledge == null || subjectKnowledge.getId() == null || ideologies.isEmpty()) {
+        if (subjectKnowledge == null || subjectKnowledge.getId() == null) {
             return;
         }
+
+        LambdaQueryWrapper<SubjectIdeologyMatch> subjectWrapper = new LambdaQueryWrapper<>();
+        subjectWrapper.eq(SubjectIdeologyMatch::getSubjectKnowledgeId, subjectKnowledge.getId());
+        if (ideologies.isEmpty()) {
+            subjectIdeologyMatchMapper.delete(subjectWrapper);
+            return;
+        }
+
+        List<Long> ideologyIds = ideologies.stream()
+                .map(IdeologyKnowledge::getId)
+                .toList();
+        LambdaQueryWrapper<SubjectIdeologyMatch> staleWrapper = new LambdaQueryWrapper<>();
+        staleWrapper.eq(SubjectIdeologyMatch::getSubjectKnowledgeId, subjectKnowledge.getId())
+                .notIn(SubjectIdeologyMatch::getIdeologyKnowledgeId, ideologyIds);
+        subjectIdeologyMatchMapper.delete(staleWrapper);
 
         // Only fixed ideology dictionary entries are persisted here. Free-form model output
         // must be resolved to ideology_knowledge first, which keeps category vocabulary stable.
@@ -259,6 +274,8 @@ public class KnowledgeIngestionService {
             match.setMatchReason(truncate(firstNonBlank(matchReason, ideology.getDescription()), 1000));
             if (match.getId() == null) {
                 subjectIdeologyMatchMapper.insert(match);
+            } else {
+                subjectIdeologyMatchMapper.updateById(match);
             }
             index++;
         }
@@ -300,14 +317,14 @@ public class KnowledgeIngestionService {
             }
         }
 
-        if (result.isEmpty()) {
+        if (false && result.isEmpty()) {
             IdeologyKnowledge fallback = findIdeologyByReason(allIdeologies, resource.getIdeologySummary());
             if (fallback != null) {
                 result.add(fallback);
             }
         }
 
-        if (result.isEmpty()) {
+        if (false && result.isEmpty()) {
             LambdaQueryWrapper<IdeologyKnowledge> wrapper = new LambdaQueryWrapper<>();
             wrapper.eq(IdeologyKnowledge::getName, "工匠精神").last("LIMIT 1");
             IdeologyKnowledge fallback = ideologyKnowledgeMapper.selectOne(wrapper);

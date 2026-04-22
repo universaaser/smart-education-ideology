@@ -3,6 +3,7 @@ package com.smartedu.controller;
 import com.smartedu.common.PageResult;
 import com.smartedu.common.Result;
 import com.smartedu.dto.KnowledgeNodeView;
+import com.smartedu.dto.NodePositionUpdateRequestDto;
 import com.smartedu.entity.KnowledgeRelation;
 import com.smartedu.service.KnowledgeExcelService;
 import com.smartedu.service.KnowledgeService;
@@ -117,9 +118,9 @@ public class KnowledgeController {
     @PatchMapping("/nodes/{id}/position")
     public Result<Void> updateNodePosition(
             @PathVariable Long id,
-            @RequestBody Map<String, Double> position) {
-        Double x = position.get("x");
-        Double y = position.get("y");
+            @RequestBody NodePositionUpdateRequestDto request) {
+        Double x = request.getX();
+        Double y = request.getY();
         knowledgeService.updateNodePosition(id, x, y);
         return Result.success("位置已更新", null);
     }

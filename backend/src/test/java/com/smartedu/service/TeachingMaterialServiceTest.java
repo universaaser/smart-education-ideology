@@ -10,6 +10,7 @@ import com.smartedu.dto.TeachingMaterialDraftDto;
 import com.smartedu.dto.TeachingMaterialSaveRequestDto;
 import com.smartedu.dto.TeachingMaterialViewDto;
 import com.smartedu.entity.ParseTask;
+import com.smartedu.entity.SubjectKnowledge;
 import com.smartedu.entity.TeachingMaterial;
 import com.smartedu.mapper.ParseTaskMapper;
 import com.smartedu.mapper.SubjectKnowledgeMapper;
@@ -21,8 +22,11 @@ import org.junit.jupiter.api.Test;
 import java.lang.reflect.Proxy;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Predicate;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -39,9 +43,13 @@ class TeachingMaterialServiceTest {
         ParseTask parseTask = new ParseTask();
         parseTask.setId(1L);
         parseTask.setUserId(7L);
+        parseTask.setCourseId(9L);
         parseTask.setFileName("iot-outline.docx");
 
-        ParseTaskMapper parseTaskMapper = buildParseTaskMapper(parseTask);
+        Map<Long, ParseTask> parseTasks = new HashMap<>();
+        parseTasks.put(parseTask.getId(), parseTask);
+
+        ParseTaskMapper parseTaskMapper = buildParseTaskMapper(parseTasks);
         TeachingMaterialMapper teachingMaterialMapper = buildTeachingMaterialMapper(store);
         SubjectKnowledgeMapper subjectKnowledgeMapper = buildSubjectKnowledgeMapper();
         TeachingMaterialTraceMapper teachingMaterialTraceMapper = buildTeachingMaterialTraceMapper();
@@ -67,6 +75,24 @@ class TeachingMaterialServiceTest {
         assertEquals(1, draft.getCases().size());
         assertEquals(1, draft.getQuestions().size());
         assertEquals(1, draft.getTraceItems().size());
+    }
+
+    @Test
+    void shouldResolveTraceKnowledgePointIdFromBatchLookup() {
+        Map<Long, ParseTask> parseTasks = new HashMap<>();
+        parseTasks.put(1L, buildParseTask(1L, "iot-outline.docx"));
+
+        TeachingMaterialService localService = new TeachingMaterialService(
+                buildTeachingMaterialMapper(store),
+                buildParseTaskMapper(parseTasks),
+                buildSubjectKnowledgeMapper(Map.of("IoT Security", 88L)),
+                buildAiServiceStub(buildPipelineResult()),
+                buildTeachingMaterialTraceMapper(),
+                new ObjectMapper()
+        );
+
+        TeachingMaterialDraftDto draft = localService.getEditorDraft(1L);
+        assertEquals(88L, draft.getTraceItems().get(0).getKnowledgePointId());
     }
 
     @Test
@@ -199,13 +225,102 @@ class TeachingMaterialServiceTest {
         assertTrue(teachingMaterialService.buildMarkdownFileName(100L).endsWith("-v3.md"));
     }
 
-    private ParseTaskMapper buildParseTaskMapper(ParseTask task) {
+    @Test
+    void shouldGroupCourseMaterialsByParseTaskAndPreferLatestTitle() {
+        ParseTask taskOne = new ParseTask();
+        taskOne.setId(1L);
+        taskOne.setUserId(7L);
+        taskOne.setCourseId(9L);
+        taskOne.setFileName("outline-a.docx");
+
+        ParseTask taskTwo = new ParseTask();
+        taskTwo.setId(2L);
+        taskTwo.setUserId(7L);
+        taskTwo.setCourseId(9L);
+        taskTwo.setFileName("outline-b.pptx");
+
+        Map<Long, ParseTask> parseTasks = new HashMap<>();
+        parseTasks.put(1L, taskOne);
+        parseTasks.put(2L, taskTwo);
+
+        TeachingMaterialService localService = new TeachingMaterialService(
+                buildTeachingMaterialMapper(store, item -> Long.valueOf(9L).equals(item.getCourseId())),
+                buildParseTaskMapper(parseTasks),
+                buildSubjectKnowledgeMapper(),
+                buildAiServiceStub(buildPipelineResult()),
+                buildTeachingMaterialTraceMapper(),
+                new ObjectMapper()
+        );
+
+        TeachingMaterial latestTaskOne = new TeachingMaterial();
+        latestTaskOne.setId(31L);
+        latestTaskOne.setParseTaskId(1L);
+        latestTaskOne.setCourseId(9L);
+        latestTaskOne.setTitle("Course Outline");
+        latestTaskOne.setVersionNo(2);
+        latestTaskOne.setIsLatest(1);
+        latestTaskOne.setStatus("PUBLISHED");
+        latestTaskOne.setUpdatedAt(LocalDateTime.now());
+
+        TeachingMaterial historyTaskOne = new TeachingMaterial();
+        historyTaskOne.setId(30L);
+        historyTaskOne.setParseTaskId(1L);
+        historyTaskOne.setCourseId(9L);
+        historyTaskOne.setTitle("");
+        historyTaskOne.setVersionNo(1);
+        historyTaskOne.setIsLatest(0);
+        historyTaskOne.setStatus("PUBLISHED");
+        historyTaskOne.setUpdatedAt(LocalDateTime.now().minusHours(2));
+
+        TeachingMaterial latestTaskTwo = new TeachingMaterial();
+        latestTaskTwo.setId(41L);
+        latestTaskTwo.setParseTaskId(2L);
+        latestTaskTwo.setCourseId(9L);
+        latestTaskTwo.setTitle("");
+        latestTaskTwo.setVersionNo(1);
+        latestTaskTwo.setIsLatest(1);
+        latestTaskTwo.setStatus("DRAFT");
+        latestTaskTwo.setUpdatedAt(LocalDateTime.now().minusHours(1));
+
+        TeachingMaterial otherCourse = new TeachingMaterial();
+        otherCourse.setId(51L);
+        otherCourse.setParseTaskId(3L);
+        otherCourse.setCourseId(11L);
+        otherCourse.setTitle("Other Course");
+        otherCourse.setVersionNo(1);
+        otherCourse.setIsLatest(1);
+        otherCourse.setStatus("PUBLISHED");
+        otherCourse.setUpdatedAt(LocalDateTime.now());
+
+        store.records.add(historyTaskOne);
+        store.records.add(latestTaskOne);
+        store.records.add(latestTaskTwo);
+        store.records.add(otherCourse);
+
+        var groups = localService.getCourseMaterialGroups(9L);
+        assertEquals(2, groups.size());
+        assertEquals(1L, groups.get(0).getParseTaskId());
+        assertEquals("Course Outline", groups.get(0).getDisplayTitle());
+        assertEquals(2, groups.get(0).getVersions().size());
+        assertEquals(2, groups.get(0).getVersions().get(0).getVersionNo());
+        assertEquals("outline-b.pptx", groups.get(1).getDisplayTitle());
+        assertEquals(1, groups.get(1).getLatestVersionNo().intValue());
+        assertTrue(groups.stream().noneMatch(group -> group.getParseTaskId().equals(3L)));
+    }
+
+    private ParseTaskMapper buildParseTaskMapper(Map<Long, ParseTask> tasks) {
         return (ParseTaskMapper) Proxy.newProxyInstance(
                 ParseTaskMapper.class.getClassLoader(),
                 new Class[]{ParseTaskMapper.class},
                 (proxy, method, args) -> {
                     if ("selectById".equals(method.getName())) {
-                        return task;
+                        return tasks.get(args[0]);
+                    }
+                    if ("selectBatchIds".equals(method.getName()) && args[0] instanceof List<?> ids) {
+                        return ids.stream()
+                                .map(tasks::get)
+                                .filter(item -> item != null)
+                                .toList();
                     }
                     if (method.getReturnType().equals(boolean.class)) {
                         return false;
@@ -218,16 +333,25 @@ class TeachingMaterialServiceTest {
     }
 
     private TeachingMaterialMapper buildTeachingMaterialMapper(TeachingMaterialStore localStore) {
+        return buildTeachingMaterialMapper(localStore, item -> true);
+    }
+
+    private TeachingMaterialMapper buildTeachingMaterialMapper(
+            TeachingMaterialStore localStore,
+            Predicate<TeachingMaterial> filter) {
         return (TeachingMaterialMapper) Proxy.newProxyInstance(
                 TeachingMaterialMapper.class.getClassLoader(),
                 new Class[]{TeachingMaterialMapper.class},
                 (proxy, method, args) -> {
                     String methodName = method.getName();
                     if ("selectOne".equals(methodName) && args[0] instanceof LambdaQueryWrapper) {
-                        return localStore.latest;
+                        return localStore.latest != null && filter.test(localStore.latest)
+                                ? localStore.latest
+                                : null;
                     }
                     if ("selectList".equals(methodName) && args[0] instanceof LambdaQueryWrapper) {
                         return localStore.records.stream()
+                                .filter(filter)
                                 .sorted((a, b) -> Integer.compare(
                                         b.getVersionNo() == null ? 0 : b.getVersionNo(),
                                         a.getVersionNo() == null ? 0 : a.getVersionNo()))
@@ -273,10 +397,26 @@ class TeachingMaterialServiceTest {
     }
 
     private SubjectKnowledgeMapper buildSubjectKnowledgeMapper() {
+        return buildSubjectKnowledgeMapper(Map.of());
+    }
+
+    private SubjectKnowledgeMapper buildSubjectKnowledgeMapper(Map<String, Long> subjectKnowledgeIdMap) {
         return (SubjectKnowledgeMapper) Proxy.newProxyInstance(
                 SubjectKnowledgeMapper.class.getClassLoader(),
                 new Class[]{SubjectKnowledgeMapper.class},
-                (proxy, method, args) -> null
+                (proxy, method, args) -> {
+                    if ("selectList".equals(method.getName())) {
+                        List<SubjectKnowledge> results = new ArrayList<>();
+                        for (Map.Entry<String, Long> entry : subjectKnowledgeIdMap.entrySet()) {
+                            SubjectKnowledge subjectKnowledge = new SubjectKnowledge();
+                            subjectKnowledge.setId(entry.getValue());
+                            subjectKnowledge.setName(entry.getKey());
+                            results.add(subjectKnowledge);
+                        }
+                        return results;
+                    }
+                    return null;
+                }
         );
     }
 
@@ -342,6 +482,15 @@ class TeachingMaterialServiceTest {
 
         resultDto.setSchemaVersion("v1");
         return resultDto;
+    }
+
+    private ParseTask buildParseTask(Long id, String fileName) {
+        ParseTask parseTask = new ParseTask();
+        parseTask.setId(id);
+        parseTask.setUserId(7L);
+        parseTask.setCourseId(9L);
+        parseTask.setFileName(fileName);
+        return parseTask;
     }
 
     private static class TeachingMaterialStore {

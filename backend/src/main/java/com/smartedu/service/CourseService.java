@@ -14,9 +14,11 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * 课程服务
@@ -70,6 +72,7 @@ public class CourseService {
         return ordered;
     }
 
+
     /**
      * 创建新课程
      */
@@ -109,13 +112,24 @@ public class CourseService {
         }
 
         List<SubjectKnowledge> matches = knowledgeRetrievalService.findRelevantSubjectKnowledge(query, 5);
+        if (matches == null || matches.isEmpty()) {
+            return;
+        }
+
+        List<CourseSubjectKnowledge> existingLinks = loadExistingCourseLinks(course.getId());
+        Set<Long> existingSubjectKnowledgeIds = new HashSet<>();
         int sortOrder = 1;
+        for (CourseSubjectKnowledge existingLink : existingLinks) {
+            if (existingLink.getSubjectKnowledgeId() != null) {
+                existingSubjectKnowledgeIds.add(existingLink.getSubjectKnowledgeId());
+            }
+            if (existingLink.getSortOrder() != null) {
+                sortOrder = Math.max(sortOrder, existingLink.getSortOrder() + 1);
+            }
+        }
+
         for (SubjectKnowledge match : matches) {
-            LambdaQueryWrapper<CourseSubjectKnowledge> wrapper = new LambdaQueryWrapper<>();
-            wrapper.eq(CourseSubjectKnowledge::getCourseId, course.getId())
-                    .eq(CourseSubjectKnowledge::getSubjectKnowledgeId, match.getId())
-                    .last("LIMIT 1");
-            if (courseSubjectKnowledgeMapper.selectOne(wrapper) != null) {
+            if (match == null || match.getId() == null || existingSubjectKnowledgeIds.contains(match.getId())) {
                 continue;
             }
 
@@ -126,6 +140,7 @@ public class CourseService {
             link.setCreatedAt(LocalDateTime.now());
             link.setUpdatedAt(LocalDateTime.now());
             courseSubjectKnowledgeMapper.insert(link);
+            existingSubjectKnowledgeIds.add(match.getId());
         }
     }
 
@@ -141,5 +156,11 @@ public class CourseService {
 
         Course course = courseMapper.selectById(courseId);
         autoAssociateSubjectKnowledge(course);
+    }
+
+    private List<CourseSubjectKnowledge> loadExistingCourseLinks(Long courseId) {
+        LambdaQueryWrapper<CourseSubjectKnowledge> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(CourseSubjectKnowledge::getCourseId, courseId);
+        return courseSubjectKnowledgeMapper.selectList(wrapper);
     }
 }

@@ -3,6 +3,7 @@ package com.smartedu.controller;
 import com.smartedu.common.PageResult;
 import com.smartedu.common.Result;
 import com.smartedu.crawler.model.CrawlTaskStatus;
+import com.smartedu.dto.ResourceManualCrawlRequestDto;
 import com.smartedu.entity.Resource;
 import com.smartedu.service.ResourceCrawlService;
 import com.smartedu.service.ResourceService;
@@ -10,7 +11,6 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
-import java.util.Map;
 
 /**
  * 资源控制器
@@ -93,7 +93,8 @@ public class ResourceController {
      * 兼容旧接口：内部转发到 start
      */
     @PostMapping("/crawl/update")
-    public Result<CrawlTaskStatus> manualCrawlUpdate(@RequestBody(required = false) Map<String, Object> request) {
+    public Result<CrawlTaskStatus> manualCrawlUpdate(
+            @RequestBody(required = false) ResourceManualCrawlRequestDto request) {
         // 保留 request 参数以兼容历史调用；当前版本固定每站新增目标=2
         CrawlTaskStatus status = resourceCrawlService.startManualCrawl();
         String message = "RUNNING".equals(status.getState()) ? "数据库更新任务已启动" : "数据库更新任务已在运行";

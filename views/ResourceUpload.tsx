@@ -1,43 +1,66 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
-  uploadApi,
-  materialApi,
-  dashboardApi,
-  chatApi,
-  UploadTaskInfo,
-  TeachingMaterialDraftInfo,
-  TeachingMaterialSaveRequest,
-  TeachingQuestionInfo,
-  TeachingTraceItemInfo,
-  MaterialVersionItemInfo,
-  TeachingMaterialTraceInfo,
-  CourseInfo,
-  SelectionExplainResponse,
-  SelectionExplainHistoryInfo
-} from '../services/api';
-import {
-  Upload, Button, Progress, Card, Typography, Space,
-  Alert, Spin, message, Avatar, Input, Divider, Tag, Select, List
+  Alert,
+  Avatar,
+  Button,
+  Card,
+  message,
+  Progress,
+  Select,
+  Space,
+  Spin,
+  Typography,
+  Upload,
 } from 'antd';
 import {
-  InboxOutlined, PlayCircleOutlined, CheckCircleOutlined,
-  CloseCircleOutlined, FileTextOutlined, ReloadOutlined,
-  FileWordOutlined, FilePdfOutlined, FileExcelOutlined, FilePptOutlined,
-  RobotOutlined, FileUnknownOutlined, DownloadOutlined, CopyOutlined
+  CheckCircleOutlined,
+  CloseCircleOutlined,
+  FileExcelOutlined,
+  FilePdfOutlined,
+  FilePptOutlined,
+  FileTextOutlined,
+  FileUnknownOutlined,
+  FileWordOutlined,
+  InboxOutlined,
+  PlayCircleOutlined,
+  ReloadOutlined,
+  RobotOutlined,
 } from '@ant-design/icons';
+import {
+  chatApi,
+  CourseInfo,
+  dashboardApi,
+  MaterialVersionItemInfo,
+  materialApi,
+  SelectionExplainHistoryInfo,
+  SelectionExplainResponse,
+  TeachingMaterialDraftInfo,
+  TeachingMaterialSaveRequest,
+  TeachingMaterialTraceInfo,
+  TeachingMaterialViewInfo,
+  TeachingQuestionInfo,
+  UploadTaskInfo,
+  uploadApi,
+} from '../services/api';
+import { TeachingMaterialEditorCard } from '../components/TeachingMaterialEditorCard';
+import { downloadBlobFile } from '../services/download';
+import { ResourceUploadTarget } from '../types';
 
 const { Title, Text, Paragraph } = Typography;
-const { TextArea } = Input;
 const { Dragger } = Upload;
 const { Option } = Select;
 
 interface ResourceUploadProps {
   userId?: number;
+  resourceUploadTarget?: ResourceUploadTarget;
 }
 
 type UploadStatus = 'idle' | 'uploading' | 'parsing' | 'completed' | 'failed';
 
-export const ResourceUpload: React.FC<ResourceUploadProps> = ({ userId = 1 }) => {
+export const ResourceUpload: React.FC<ResourceUploadProps> = ({
+  userId,
+  resourceUploadTarget,
+}) => {
   const [file, setFile] = useState<File | null>(null);
   const [status, setStatus] = useState<UploadStatus>('idle');
   const [progress, setProgress] = useState(0);
@@ -66,14 +89,20 @@ export const ResourceUpload: React.FC<ResourceUploadProps> = ({ userId = 1 }) =>
   const [selectionExplainHistory, setSelectionExplainHistory] = useState<SelectionExplainHistoryInfo[]>([]);
   const [selectionHistoryLoading, setSelectionHistoryLoading] = useState(false);
   const [selectedLectureText, setSelectedLectureText] = useState('');
+  const [openContextWarning, setOpenContextWarning] = useState('');
   const pollTimerRef = useRef<number | null>(null);
   const isUnmountedRef = useRef(false);
+  const openedExternalTargetKeyRef = useRef('');
+  const dismissedExternalTargetKeyRef = useRef('');
+  const resourceUploadTargetKey = resourceUploadTarget
+    ? `${resourceUploadTarget.taskId}:${resourceUploadTarget.materialId ?? 'latest'}`
+    : '';
+  const hasActiveUser = userId !== undefined && userId !== null;
 
   useEffect(() => {
     return () => {
       /**
-       * 组件卸载时清理轮询定时器，避免卸载后继续 setState。
-       * 这是上传页离开后仍有异步回调触发的主要风险点。
+       * 页面卸载时必须清理轮询，避免任务轮询在视图切走后继续回写状态。
        */
       isUnmountedRef.current = true;
       if (pollTimerRef.current !== null) {
@@ -101,20 +130,80 @@ export const ResourceUpload: React.FC<ResourceUploadProps> = ({ userId = 1 }) =>
         }
       }
     };
+
     loadCourses();
   }, []);
 
-  const loadMaterialVersions = async (taskId: number) => {
+  const buildDraftFromMaterial = (material: TeachingMaterialViewInfo): TeachingMaterialDraftInfo => ({
+    materialId: material.materialId,
+    parseTaskId: material.parseTaskId,
+    userId: material.userId,
+    courseId: material.courseId,
+    title: material.title || '',
+    lectureNotes: material.lectureNotes || '',
+    cases: material.cases || [],
+    questions: material.questions || [],
+    traceItems: material.traceItems || [],
+    schemaVersion: material.schemaVersion || 'v1',
+    versionNo: material.versionNo || 0,
+    status: material.status || 'DRAFT',
+    updatedAt: material.updatedAt,
+  });
+
+  const resetTransientPanels = () => {
+    setTraceRows([]);
+    setTraceTotal(0);
+    setTraceLoading(false);
+    setTraceKnowledgeFilter('');
+    setTraceIdeologyFilter('');
+    setTraceUseCourseFilter(false);
+    setRollbackTip('');
+    setSelectionExplainLoading(false);
+    setSelectionExplainResult(null);
+    setSelectionExplainHistory([]);
+    setSelectionHistoryLoading(false);
+    setSelectedLectureText('');
+  };
+
+  const resetWorkingState = (options?: { preserveWarning?: boolean }) => {
+    if (pollTimerRef.current !== null) {
+      window.clearTimeout(pollTimerRef.current);
+      pollTimerRef.current = null;
+    }
+    setFile(null);
+    setStatus('idle');
+    setProgress(0);
+    setCurrentStep('');
+    setTaskResult(null);
+    setError('');
+    setEditorDraft(null);
+    setEditorLoading(false);
+    setSavingDraft(false);
+    setPublishingVersion(false);
+    setMaterialVersions([]);
+    setVersionsLoading(false);
+    setExportingMarkdown(false);
+    setSelectedCourseId(undefined);
+    resetTransientPanels();
+    if (!options?.preserveWarning) {
+      setOpenContextWarning('');
+    }
+  };
+
+  const loadMaterialVersions = async (taskId: number): Promise<MaterialVersionItemInfo[]> => {
     setVersionsLoading(true);
     try {
       const versions = await uploadApi.getTaskMaterialVersions(taskId);
       if (!isUnmountedRef.current) {
         setMaterialVersions(versions);
       }
+      return versions;
     } catch {
       if (!isUnmountedRef.current) {
+        setMaterialVersions([]);
         message.error('Failed to load material versions');
       }
+      return [];
     } finally {
       if (!isUnmountedRef.current) {
         setVersionsLoading(false);
@@ -132,18 +221,18 @@ export const ResourceUpload: React.FC<ResourceUploadProps> = ({ userId = 1 }) =>
       const courseIdFilter = traceUseCourseFilter && selectedCourseId ? selectedCourseId : undefined;
       const response = materialId
         ? await materialApi.getTraces(materialId, {
-          knowledgePoint: traceKnowledgeFilter.trim() || undefined,
-          ideologyElement: traceIdeologyFilter.trim() || undefined,
-          page,
-          size: 20,
-        })
+            knowledgePoint: traceKnowledgeFilter.trim() || undefined,
+            ideologyElement: traceIdeologyFilter.trim() || undefined,
+            page,
+            size: 20,
+          })
         : await uploadApi.getTaskTraces(taskId, {
-          courseId: courseIdFilter,
-          knowledgePoint: traceKnowledgeFilter.trim() || undefined,
-          ideologyElement: traceIdeologyFilter.trim() || undefined,
-          page,
-          size: 20,
-        });
+            courseId: courseIdFilter,
+            knowledgePoint: traceKnowledgeFilter.trim() || undefined,
+            ideologyElement: traceIdeologyFilter.trim() || undefined,
+            page,
+            size: 20,
+          });
 
       if (!isUnmountedRef.current) {
         setTraceRows(response.records || []);
@@ -164,12 +253,19 @@ export const ResourceUpload: React.FC<ResourceUploadProps> = ({ userId = 1 }) =>
     materialId?: number | null,
     courseId?: number | null,
   ) => {
+    if (!hasActiveUser) {
+      if (!isUnmountedRef.current) {
+        setSelectionExplainHistory([]);
+        setSelectionHistoryLoading(false);
+      }
+      return;
+    }
     setSelectionHistoryLoading(true);
     try {
       const response = await chatApi.getSelectionExplainHistory({
         userId,
-        materialId: materialId || undefined,
-        courseId: materialId ? undefined : courseId || undefined,
+        materialId: materialId ?? undefined,
+        courseId: materialId ? undefined : courseId ?? undefined,
         page: 1,
         size: 10,
       });
@@ -187,127 +283,218 @@ export const ResourceUpload: React.FC<ResourceUploadProps> = ({ userId = 1 }) =>
     }
   };
 
+  const refreshEditorPanels = async (
+    taskId: number,
+    materialId?: number | null,
+    courseId?: number | null,
+  ) => {
+    await Promise.all([
+      loadTraceRows(taskId, materialId),
+      loadSelectionExplainHistory(materialId, courseId),
+    ]);
+  };
+
+  const loadMaterialIntoEditor = async (
+    materialId: number,
+    options?: { successMessage?: boolean },
+  ): Promise<TeachingMaterialDraftInfo> => {
+    const material = await materialApi.getById(materialId);
+    const draft = buildDraftFromMaterial(material);
+    if (!isUnmountedRef.current) {
+      setEditorDraft(draft);
+      setSelectedCourseId(material.courseId ?? undefined);
+      setRollbackTip('');
+    }
+    await refreshEditorPanels(material.parseTaskId, material.materialId, material.courseId);
+    if (options?.successMessage && !isUnmountedRef.current) {
+      message.success(`Loaded version ${material.versionNo}`);
+    }
+    return draft;
+  };
+
+  const loadTaskIntoEditor = async (
+    taskInfo: UploadTaskInfo,
+    preferredMaterialId?: number,
+  ) => {
+    setEditorLoading(true);
+    try {
+      const draft = await uploadApi.getEditorDraft(taskInfo.taskId);
+      if (isUnmountedRef.current) {
+        return;
+      }
+
+      setFile(null);
+      setStatus('completed');
+      setProgress(taskInfo.progress || 100);
+      setCurrentStep(taskInfo.currentStep || '');
+      setTaskResult(taskInfo);
+      setError('');
+      setSelectionExplainResult(null);
+      setSelectedLectureText('');
+      setRollbackTip('');
+      setTraceRows([]);
+      setTraceTotal(0);
+      setEditorDraft(draft);
+      setSelectedCourseId(draft.courseId ?? taskInfo.courseId ?? undefined);
+
+      let activeDraft = draft;
+      const versions = await loadMaterialVersions(taskInfo.taskId);
+      if (preferredMaterialId !== undefined) {
+        const exists = versions.some((version) => version.materialId === preferredMaterialId);
+        if (!exists) {
+          throw new Error('Requested material version was not found for this task');
+        }
+        activeDraft = await loadMaterialIntoEditor(preferredMaterialId);
+      } else {
+        await refreshEditorPanels(taskInfo.taskId, draft.materialId, draft.courseId);
+      }
+
+      if (!isUnmountedRef.current) {
+        setEditorDraft(activeDraft);
+      }
+    } finally {
+      if (!isUnmountedRef.current) {
+        setEditorLoading(false);
+      }
+    }
+  };
+
   useEffect(() => {
-    const loadEditorDraft = async () => {
-      const taskId = taskResult?.taskId;
-      if (!taskId || status !== 'completed') return;
-      setEditorLoading(true);
+    if (!resourceUploadTargetKey) {
+      dismissedExternalTargetKeyRef.current = '';
+      if (openedExternalTargetKeyRef.current) {
+        openedExternalTargetKeyRef.current = '';
+        resetWorkingState();
+      }
+      return;
+    }
+
+    if (dismissedExternalTargetKeyRef.current === resourceUploadTargetKey) {
+      return;
+    }
+
+    if (openedExternalTargetKeyRef.current === resourceUploadTargetKey) {
+      return;
+    }
+
+    let cancelled = false;
+
+    const openExistingTask = async () => {
+      setOpenContextWarning('');
       try {
-        const draft = await uploadApi.getEditorDraft(taskId);
-        if (!isUnmountedRef.current) {
-          setEditorDraft(draft);
-          if (draft.courseId) {
-            setSelectedCourseId(draft.courseId);
-          }
+        const taskInfo = await uploadApi.getTaskStatus(resourceUploadTarget.taskId);
+        if (cancelled || isUnmountedRef.current) {
+          return;
         }
-        await loadMaterialVersions(taskId);
-        await loadTraceRows(taskId, draft.materialId);
-        await loadSelectionExplainHistory(draft.materialId, draft.courseId);
-      } catch {
-        if (!isUnmountedRef.current) {
-          message.error('Failed to load editor draft');
+        if (taskInfo.status !== 'COMPLETED') {
+          throw new Error(`Task ${resourceUploadTarget.taskId} is not ready for editing`);
         }
-      } finally {
-        if (!isUnmountedRef.current) {
-          setEditorLoading(false);
+        await loadTaskIntoEditor(taskInfo, resourceUploadTarget.materialId);
+        if (cancelled || isUnmountedRef.current) {
+          return;
         }
+        openedExternalTargetKeyRef.current = resourceUploadTargetKey;
+        dismissedExternalTargetKeyRef.current = '';
+      } catch (error: unknown) {
+        if (cancelled || isUnmountedRef.current) {
+          return;
+        }
+        openedExternalTargetKeyRef.current = '';
+        dismissedExternalTargetKeyRef.current = resourceUploadTargetKey;
+        resetWorkingState({ preserveWarning: true });
+        setOpenContextWarning(
+          error instanceof Error
+            ? error.message
+            : 'Failed to open the requested teaching material',
+        );
       }
     };
-    loadEditorDraft();
-  }, [taskResult?.taskId, status]);
 
-  const pollTaskStatus = async (taskId: number) => {
+    openExistingTask();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [resourceUploadTarget, resourceUploadTargetKey]);
+
+  const pollTaskStatus = (taskId: number) => {
     const poll = async () => {
       try {
         const taskInfo = await uploadApi.getTaskStatus(taskId);
-        if (isUnmountedRef.current) return;
+        if (isUnmountedRef.current) {
+          return;
+        }
 
         setProgress(taskInfo.progress);
         setCurrentStep(taskInfo.currentStep);
 
         if (taskInfo.status === 'COMPLETED') {
-          setStatus('completed');
-          setTaskResult(taskInfo);
+          await loadTaskIntoEditor(taskInfo);
           return;
         }
 
         if (taskInfo.status === 'FAILED') {
           setStatus('failed');
-          setError(taskInfo.errorMessage || '解析失败');
+          setError(taskInfo.errorMessage || 'Failed to parse file');
           return;
         }
 
         pollTimerRef.current = window.setTimeout(poll, 2000);
       } catch {
-        if (isUnmountedRef.current) return;
-        setStatus('failed');
-        setError('获取任务状态失败');
+        if (!isUnmountedRef.current) {
+          setStatus('failed');
+          setError('Failed to fetch task status');
+        }
       }
     };
+
     poll();
   };
 
   const handleUpload = async () => {
-    if (!file) return;
+    if (!file) {
+      return;
+    }
+    const activeUserId = userId;
+    if (activeUserId === undefined || activeUserId === null) {
+      message.error('Current user is unavailable');
+      return;
+    }
 
     if (pollTimerRef.current !== null) {
       window.clearTimeout(pollTimerRef.current);
       pollTimerRef.current = null;
     }
 
+    dismissedExternalTargetKeyRef.current = '';
+    openedExternalTargetKeyRef.current = '';
     setStatus('uploading');
     setProgress(0);
     setError('');
-    setCurrentStep('正在上传文件...');
+    setOpenContextWarning('');
+    setCurrentStep('Uploading file...');
 
     try {
-      const result = await uploadApi.uploadFile(file, userId, selectedCourseId);
+      const result = await uploadApi.uploadFile(file, activeUserId, selectedCourseId);
       setStatus('parsing');
       setProgress(10);
-      setCurrentStep('文件已上传，正在解析...');
+      setCurrentStep('File uploaded, parsing in progress...');
       pollTaskStatus(result.taskId);
     } catch (err: unknown) {
       setStatus('failed');
-      setError(err instanceof Error ? err.message : '上传失败');
-      message.error('上传失败');
+      setError(err instanceof Error ? err.message : 'Upload failed');
+      message.error('Upload failed');
     }
   };
 
   const handleReset = () => {
-    if (pollTimerRef.current !== null) {
-      window.clearTimeout(pollTimerRef.current);
-      pollTimerRef.current = null;
-    }
-    setFile(null);
-    setStatus('idle');
-    setProgress(0);
-    setCurrentStep('');
-    setTaskResult(null);
-    setError('');
-    setEditorDraft(null);
-    setEditorLoading(false);
-    setSavingDraft(false);
-    setPublishingVersion(false);
-    setMaterialVersions([]);
-    setVersionsLoading(false);
-    setExportingMarkdown(false);
-    setSelectedCourseId(undefined);
-    setTraceRows([]);
-    setTraceTotal(0);
-    setTraceLoading(false);
-    setTraceKnowledgeFilter('');
-    setTraceIdeologyFilter('');
-    setTraceUseCourseFilter(false);
-    setRollbackTip('');
-    setSelectionExplainLoading(false);
-    setSelectionExplainResult(null);
-    setSelectionExplainHistory([]);
-    setSelectionHistoryLoading(false);
-    setSelectedLectureText('');
+    dismissedExternalTargetKeyRef.current = resourceUploadTargetKey;
+    openedExternalTargetKeyRef.current = '';
+    resetWorkingState();
   };
 
   const updateEditorDraft = (updater: (draft: TeachingMaterialDraftInfo) => TeachingMaterialDraftInfo) => {
-    setEditorDraft(prev => (prev ? updater(prev) : prev));
+    setEditorDraft((previous) => (previous ? updater(previous) : previous));
   };
 
   const updateCaseItem = (index: number, value: string) => {
@@ -323,17 +510,17 @@ export const ResourceUpload: React.FC<ResourceUploadProps> = ({ userId = 1 }) =>
   };
 
   const removeCaseItem = (index: number) => {
-    updateEditorDraft((draft) => ({ ...draft, cases: draft.cases.filter((_, i) => i !== index) }));
+    updateEditorDraft((draft) => ({
+      ...draft,
+      cases: draft.cases.filter((_, currentIndex) => currentIndex !== index),
+    }));
   };
 
   const updateQuestion = (index: number, field: keyof TeachingQuestionInfo, value: string | string[]) => {
     updateEditorDraft((draft) => {
       const questions = [...draft.questions];
       const current = questions[index] || { stem: '', referenceAnswer: '', scoringPoints: [] };
-      questions[index] = {
-        ...current,
-        [field]: value,
-      };
+      questions[index] = { ...current, [field]: value };
       return { ...draft, questions };
     });
   };
@@ -341,14 +528,14 @@ export const ResourceUpload: React.FC<ResourceUploadProps> = ({ userId = 1 }) =>
   const addQuestion = () => {
     updateEditorDraft((draft) => ({
       ...draft,
-      questions: [...draft.questions, { stem: '', referenceAnswer: '', scoringPoints: [''] }]
+      questions: [...draft.questions, { stem: '', referenceAnswer: '', scoringPoints: [''] }],
     }));
   };
 
   const removeQuestion = (index: number) => {
     updateEditorDraft((draft) => ({
       ...draft,
-      questions: draft.questions.filter((_, i) => i !== index)
+      questions: draft.questions.filter((_, currentIndex) => currentIndex !== index),
     }));
   };
 
@@ -367,7 +554,10 @@ export const ResourceUpload: React.FC<ResourceUploadProps> = ({ userId = 1 }) =>
     updateEditorDraft((draft) => {
       const questions = [...draft.questions];
       const target = questions[questionIndex] || { stem: '', referenceAnswer: '', scoringPoints: [] };
-      questions[questionIndex] = { ...target, scoringPoints: [...(target.scoringPoints || []), ''] };
+      questions[questionIndex] = {
+        ...target,
+        scoringPoints: [...(target.scoringPoints || []), ''],
+      };
       return { ...draft, questions };
     });
   };
@@ -378,7 +568,7 @@ export const ResourceUpload: React.FC<ResourceUploadProps> = ({ userId = 1 }) =>
       const target = questions[questionIndex] || { stem: '', referenceAnswer: '', scoringPoints: [] };
       questions[questionIndex] = {
         ...target,
-        scoringPoints: (target.scoringPoints || []).filter((_, i) => i !== pointIndex)
+        scoringPoints: (target.scoringPoints || []).filter((_, currentIndex) => currentIndex !== pointIndex),
       };
       return { ...draft, questions };
     });
@@ -387,22 +577,24 @@ export const ResourceUpload: React.FC<ResourceUploadProps> = ({ userId = 1 }) =>
   const buildSavePayload = (draft: TeachingMaterialDraftInfo): TeachingMaterialSaveRequest => ({
     title: draft.title || '',
     lectureNotes: draft.lectureNotes || '',
-    cases: (draft.cases || []).map(item => item.trim()).filter(Boolean),
+    cases: (draft.cases || []).map((item) => item.trim()).filter(Boolean),
     questions: (draft.questions || []).map((question) => ({
       stem: question.stem?.trim() || '',
       referenceAnswer: question.referenceAnswer?.trim() || '',
-      scoringPoints: (question.scoringPoints || []).map(point => point.trim()).filter(Boolean),
+      scoringPoints: (question.scoringPoints || []).map((point) => point.trim()).filter(Boolean),
     })),
   });
 
   const handleSaveDraft = async () => {
-    if (!taskResult?.taskId || !editorDraft) return;
+    if (!taskResult?.taskId || !editorDraft) {
+      return;
+    }
     setSavingDraft(true);
     try {
       const saved = await uploadApi.saveEditorDraft(taskResult.taskId, buildSavePayload(editorDraft));
       setEditorDraft(saved);
-      await loadTraceRows(taskResult.taskId, saved.materialId);
-      await loadSelectionExplainHistory(saved.materialId, saved.courseId);
+      setSelectedCourseId(saved.courseId ?? taskResult.courseId ?? undefined);
+      await refreshEditorPanels(taskResult.taskId, saved.materialId, saved.courseId);
       message.success('Draft saved');
     } catch (err: unknown) {
       message.error(err instanceof Error ? err.message : 'Failed to save draft');
@@ -412,25 +604,28 @@ export const ResourceUpload: React.FC<ResourceUploadProps> = ({ userId = 1 }) =>
   };
 
   const handlePublishVersion = async () => {
-    if (!taskResult?.taskId || !editorDraft) return;
+    if (!taskResult?.taskId || !editorDraft) {
+      return;
+    }
     setPublishingVersion(true);
     try {
       const saved = await uploadApi.savePublishedMaterial(taskResult.taskId, buildSavePayload(editorDraft));
-      setEditorDraft(prev => prev ? {
-        ...prev,
-        materialId: saved.materialId,
-        courseId: saved.courseId,
-        versionNo: saved.versionNo,
-        status: saved.status,
-        updatedAt: saved.updatedAt,
-        traceItems: saved.traceItems,
-      } : prev);
-      if (saved.courseId) {
-        setSelectedCourseId(saved.courseId);
-      }
+      setEditorDraft((previous) =>
+        previous
+          ? {
+              ...previous,
+              materialId: saved.materialId,
+              courseId: saved.courseId,
+              versionNo: saved.versionNo,
+              status: saved.status,
+              updatedAt: saved.updatedAt,
+              traceItems: saved.traceItems,
+            }
+          : previous,
+      );
+      setSelectedCourseId(saved.courseId ?? taskResult.courseId ?? undefined);
       await loadMaterialVersions(taskResult.taskId);
-      await loadTraceRows(taskResult.taskId, saved.materialId);
-      await loadSelectionExplainHistory(saved.materialId, saved.courseId);
+      await refreshEditorPanels(taskResult.taskId, saved.materialId, saved.courseId);
       setRollbackTip('');
       message.success(`Version ${saved.versionNo} saved`);
     } catch (err: unknown) {
@@ -443,29 +638,7 @@ export const ResourceUpload: React.FC<ResourceUploadProps> = ({ userId = 1 }) =>
   const handleViewVersion = async (materialId: number) => {
     setEditorLoading(true);
     try {
-      const material = await materialApi.getById(materialId);
-      setEditorDraft({
-        materialId: material.materialId,
-        parseTaskId: material.parseTaskId,
-        userId: material.userId,
-        courseId: material.courseId,
-        title: material.title || '',
-        lectureNotes: material.lectureNotes || '',
-        cases: material.cases || [],
-        questions: material.questions || [],
-        traceItems: material.traceItems || [],
-        schemaVersion: material.schemaVersion || 'v1',
-        versionNo: material.versionNo || 0,
-        status: material.status || 'DRAFT',
-        updatedAt: material.updatedAt,
-      });
-      if (material.courseId) {
-        setSelectedCourseId(material.courseId);
-      }
-      await loadTraceRows(material.parseTaskId, material.materialId);
-      await loadSelectionExplainHistory(material.materialId, material.courseId);
-      setRollbackTip('');
-      message.success(`Loaded version ${material.versionNo}`);
+      await loadMaterialIntoEditor(materialId, { successMessage: true });
     } catch (err: unknown) {
       message.error(err instanceof Error ? err.message : 'Failed to load material version');
     } finally {
@@ -482,14 +655,7 @@ export const ResourceUpload: React.FC<ResourceUploadProps> = ({ userId = 1 }) =>
     setExportingMarkdown(true);
     try {
       const blob = await materialApi.exportMarkdown(materialId);
-      const url = window.URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `teaching-material-${materialId}.md`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      window.URL.revokeObjectURL(url);
+      downloadBlobFile(blob, `teaching-material-${materialId}.md`);
       message.success('Markdown exported');
     } catch (err: unknown) {
       message.error(err instanceof Error ? err.message : 'Failed to export markdown');
@@ -499,19 +665,20 @@ export const ResourceUpload: React.FC<ResourceUploadProps> = ({ userId = 1 }) =>
   };
 
   const handleRollbackVersion = async (materialId: number, versionNo: number) => {
-    if (!taskResult?.taskId) return;
+    if (!taskResult?.taskId) {
+      return;
+    }
     setEditorLoading(true);
     try {
       const rolledBack = await uploadApi.rollbackMaterialVersion(taskResult.taskId, materialId);
       setEditorDraft(rolledBack);
-      if (rolledBack.courseId) {
-        setSelectedCourseId(rolledBack.courseId);
-      }
+      setSelectedCourseId(rolledBack.courseId ?? taskResult.courseId ?? undefined);
       await loadMaterialVersions(taskResult.taskId);
-      await loadTraceRows(taskResult.taskId, rolledBack.materialId);
-      await loadSelectionExplainHistory(rolledBack.materialId, rolledBack.courseId);
-      const now = new Date().toLocaleString();
-      setRollbackTip(`Rolled back from version v${versionNo} at ${now}. Unsaved until you click Save Draft or Save Version.`);
+      await refreshEditorPanels(taskResult.taskId, rolledBack.materialId, rolledBack.courseId);
+      const rollbackTime = new Date().toLocaleString();
+      setRollbackTip(
+        `Rolled back from version v${versionNo} at ${rollbackTime}. Unsaved until you click Save Draft or Save Version.`,
+      );
       message.success(`Rolled back from version v${versionNo}`);
     } catch (err: unknown) {
       message.error(err instanceof Error ? err.message : 'Failed to rollback version');
@@ -521,7 +688,9 @@ export const ResourceUpload: React.FC<ResourceUploadProps> = ({ userId = 1 }) =>
   };
 
   const handleSearchTraces = async () => {
-    if (!taskResult?.taskId) return;
+    if (!taskResult?.taskId) {
+      return;
+    }
     await loadTraceRows(taskResult.taskId, editorDraft?.materialId || null);
   };
 
@@ -537,7 +706,14 @@ export const ResourceUpload: React.FC<ResourceUploadProps> = ({ userId = 1 }) =>
   };
 
   const handleExplainSelection = async () => {
-    if (!taskResult?.taskId || !editorDraft) return;
+    if (!taskResult?.taskId || !editorDraft) {
+      return;
+    }
+    const activeUserId = userId;
+    if (activeUserId === undefined || activeUserId === null) {
+      message.error('Current user is unavailable');
+      return;
+    }
     const text = getSelectedText();
     if (!text) {
       message.warning('Select text in Lecture Notes before explaining');
@@ -547,7 +723,7 @@ export const ResourceUpload: React.FC<ResourceUploadProps> = ({ userId = 1 }) =>
     try {
       const response = await chatApi.explainSelection({
         text,
-        userId,
+        userId: activeUserId,
         courseId: editorDraft.courseId || selectedCourseId || null,
         materialId: editorDraft.materialId || null,
         parseTaskId: taskResult.taskId,
@@ -590,24 +766,31 @@ export const ResourceUpload: React.FC<ResourceUploadProps> = ({ userId = 1 }) =>
   };
 
   const formatFileSize = (bytes: number): string => {
-    if (bytes === 0) return '0 B';
-    const k = 1024;
+    if (bytes === 0) {
+      return '0 B';
+    }
+    const unit = 1024;
     const sizes = ['B', 'KB', 'MB', 'GB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+    const index = Math.floor(Math.log(bytes) / Math.log(unit));
+    return `${parseFloat((bytes / Math.pow(unit, index)).toFixed(1))} ${sizes[index]}`;
   };
 
   const getFileIcon = (fileName: string) => {
-    const ext = fileName.split('.').pop()?.toLowerCase();
-    switch (ext) {
+    const extension = fileName.split('.').pop()?.toLowerCase();
+    switch (extension) {
       case 'doc':
-      case 'docx': return <FileWordOutlined style={{ color: '#1677ff' }} />;
-      case 'pdf':  return <FilePdfOutlined style={{ color: '#cf1322' }} />;
+      case 'docx':
+        return <FileWordOutlined style={{ color: '#1677ff' }} />;
+      case 'pdf':
+        return <FilePdfOutlined style={{ color: '#cf1322' }} />;
       case 'xls':
-      case 'xlsx': return <FileExcelOutlined style={{ color: '#389e0d' }} />;
+      case 'xlsx':
+        return <FileExcelOutlined style={{ color: '#389e0d' }} />;
       case 'ppt':
-      case 'pptx': return <FilePptOutlined style={{ color: '#d4380d' }} />;
-      default:     return <FileUnknownOutlined style={{ color: '#8c8c8c' }} />;
+      case 'pptx':
+        return <FilePptOutlined style={{ color: '#d4380d' }} />;
+      default:
+        return <FileUnknownOutlined style={{ color: '#8c8c8c' }} />;
     }
   };
 
@@ -615,36 +798,55 @@ export const ResourceUpload: React.FC<ResourceUploadProps> = ({ userId = 1 }) =>
     name: 'file',
     multiple: false,
     fileList: [],
-    beforeUpload: (file) => {
-      const isAllowed = /\.(pdf|doc|docx|ppt|pptx|xls|xlsx)$/i.test(file.name);
+    beforeUpload: (nextFile: File) => {
+      const isAllowed = /\.(pdf|doc|docx|ppt|pptx|xls|xlsx)$/i.test(nextFile.name);
       if (!isAllowed) {
-        message.error(`${file.name} 格式不支持！`);
+        message.error(`${nextFile.name} format is not supported`);
         return Upload.LIST_IGNORE;
       }
-      setFile(file);
+      dismissedExternalTargetKeyRef.current = resourceUploadTargetKey;
+      openedExternalTargetKeyRef.current = '';
+      setOpenContextWarning('');
+      setFile(nextFile);
       setStatus('idle');
       setError('');
       setTaskResult(null);
+      setEditorDraft(null);
       setMaterialVersions([]);
-      setTraceRows([]);
-      setTraceTotal(0);
-      setRollbackTip('');
-      return false; // 阻止自动上传
+      resetTransientPanels();
+      return false;
     },
-    disabled: status !== 'idle'
+    disabled: status !== 'idle',
   };
 
   return (
     <div style={{ flex: 1, overflowY: 'auto', padding: '32px' }}>
-      <div style={{ maxWidth: 800, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '32px' }}>
-        
-        {/* 头部 */}
+      <div
+        style={{
+          maxWidth: 880,
+          margin: '0 auto',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '24px',
+        }}
+      >
         <div>
-          <Title level={2} style={{ margin: 0, fontFamily: "'Lexend', sans-serif" }}>智能文档解析</Title>
-          <Text type="secondary">上传教学文档，AI 自动提取知识点并挖掘思政元素</Text>
+          <Title level={2} style={{ margin: 0, fontFamily: "'Lexend', sans-serif" }}>
+            Intelligent Material Parsing
+          </Title>
+          <Text type="secondary">
+            Upload teaching documents, generate editable teaching materials, and manage versions in one place.
+          </Text>
         </div>
 
-        {/* 上传区 */}
+        {openContextWarning && (
+          <Alert
+            type="warning"
+            showIcon
+            message={openContextWarning}
+          />
+        )}
+
         <Card bordered={false} style={{ borderRadius: 12 }}>
           <Space direction="vertical" size={6} style={{ width: '100%' }}>
             <Text strong>Course Binding (Optional)</Text>
@@ -663,7 +865,7 @@ export const ResourceUpload: React.FC<ResourceUploadProps> = ({ userId = 1 }) =>
               ))}
             </Select>
             <Text type="secondary" style={{ fontSize: 12 }}>
-              Selected course will be attached to parse task, material versions, and AI generation context.
+              Selected course will be attached to the parse task, saved material versions, and trace queries.
             </Text>
           </Space>
         </Card>
@@ -671,78 +873,92 @@ export const ResourceUpload: React.FC<ResourceUploadProps> = ({ userId = 1 }) =>
         <Card bordered={false} bodyStyle={{ padding: status === 'idle' ? 32 : 16 }} style={{ borderRadius: 16 }}>
           {status === 'idle' && (
             <div style={{ marginBottom: file ? 24 : 0 }}>
-              <Dragger {...draggerProps} style={{ padding: '32px 0', border: '2px dashed #e2e8f0', borderRadius: 16 }}>
+              <Dragger
+                {...draggerProps}
+                style={{ padding: '32px 0', border: '2px dashed #e2e8f0', borderRadius: 16 }}
+              >
                 <p className="ant-upload-drag-icon">
                   <InboxOutlined style={{ color: '#1677ff', opacity: 0.8 }} />
                 </p>
-                <p className="ant-upload-text">拖拽文件到此处，或点击浏览</p>
-                <p className="ant-upload-hint">支持 PDF、Word、PPT、Excel 格式，最大 50MB</p>
+                <p className="ant-upload-text">Drag a file here, or click to browse</p>
+                <p className="ant-upload-hint">Supports PDF, Word, PPT, and Excel files up to 50MB</p>
               </Dragger>
             </div>
           )}
 
           {file && status === 'idle' && (
             <Alert
-              message={
-                 <Space align="center" style={{ width: '100%', justifyContent: 'space-between' }}>
-                   <Space size={16}>
-                     <Avatar icon={getFileIcon(file.name)} style={{ backgroundColor: '#f0f5ff' }} size="large" />
-                     <Space direction="vertical" size={2}>
-                       <Text strong>{file.name}</Text>
-                       <Text type="secondary" style={{ fontSize: 12 }}>{formatFileSize(file.size)}</Text>
-                     </Space>
-                   </Space>
-                   <Button type="primary" icon={<PlayCircleOutlined />} onClick={handleUpload}>开始解析</Button>
-                 </Space>
-              }
-              type="info"
               showIcon={false}
+              type="info"
               style={{ borderRadius: 12, border: '1px solid #bae0ff', backgroundColor: '#e6f4ff' }}
+              message={
+                <Space align="center" style={{ width: '100%', justifyContent: 'space-between' }}>
+                  <Space size={16}>
+                    <Avatar icon={getFileIcon(file.name)} style={{ backgroundColor: '#f0f5ff' }} size="large" />
+                    <Space direction="vertical" size={2}>
+                      <Text strong>{file.name}</Text>
+                      <Text type="secondary" style={{ fontSize: 12 }}>
+                        {formatFileSize(file.size)}
+                      </Text>
+                    </Space>
+                  </Space>
+                  <Button type="primary" icon={<PlayCircleOutlined />} onClick={handleUpload}>
+                    Start Parsing
+                  </Button>
+                </Space>
+              }
             />
           )}
 
-          {/* 解析中 */}
           {(status === 'uploading' || status === 'parsing') && (
             <div style={{ textAlign: 'center', padding: '40px 0' }}>
               <Spin size="large" style={{ marginBottom: 16 }} />
               <div style={{ marginBottom: 16 }}>
-                <Text strong>{currentStep || '处理中...'}</Text>
+                <Text strong>{currentStep || 'Processing...'}</Text>
                 <br />
-                <Text type="secondary" style={{ fontSize: 12 }}>{file?.name}</Text>
+                <Text type="secondary" style={{ fontSize: 12 }}>
+                  {file?.name}
+                </Text>
               </div>
               <Progress percent={progress} status="active" />
             </div>
           )}
 
-          {/* 失败 */}
           {status === 'failed' && (
             <Alert
-              message="解析失败"
+              message="Parsing failed"
               description={error}
               type="error"
               showIcon
               icon={<CloseCircleOutlined />}
-              action={<Button icon={<ReloadOutlined />} onClick={handleReset} size="small" type="primary" danger ghost>重新上传</Button>}
+              action={
+                <Button icon={<ReloadOutlined />} onClick={handleReset} size="small" type="primary" danger ghost>
+                  Upload Again
+                </Button>
+              }
               style={{ borderRadius: 12, padding: 24 }}
             />
           )}
         </Card>
 
-        {/* 成功预览 */}
         {status === 'completed' && taskResult && (
           <Space direction="vertical" size="large" style={{ width: '100%' }}>
             <Alert
-              message={<Text strong>解析完成：{taskResult.fileName}</Text>}
+              message={<Text strong>Parsing completed: {taskResult.fileName}</Text>}
               type="success"
               showIcon
               icon={<CheckCircleOutlined />}
-              action={<Button type="default" size="small" icon={<ReloadOutlined />} onClick={handleReset}>上传新文件</Button>}
+              action={
+                <Button type="default" size="small" icon={<ReloadOutlined />} onClick={handleReset}>
+                  Upload New File
+                </Button>
+              }
               style={{ borderRadius: 12, padding: '16px 20px' }}
             />
 
             {taskResult.parsedContent && (
-              <Card 
-                title={<Space><FileTextOutlined style={{ color: '#1677ff' }} /> 文档内容摘要</Space>}
+              <Card
+                title={<Space><FileTextOutlined style={{ color: '#1677ff' }} /> Parsed Content Summary</Space>}
                 bordered={false}
                 style={{ borderRadius: 12 }}
               >
@@ -753,8 +969,8 @@ export const ResourceUpload: React.FC<ResourceUploadProps> = ({ userId = 1 }) =>
             )}
 
             {taskResult.aiAnalysis && (
-              <Card 
-                title={<Space><RobotOutlined style={{ color: '#ef4444' }} /> 思政价值分析</Space>}
+              <Card
+                title={<Space><RobotOutlined style={{ color: '#ef4444' }} /> AI Analysis</Space>}
                 bordered={false}
                 style={{ borderRadius: 12 }}
               >
@@ -763,395 +979,57 @@ export const ResourceUpload: React.FC<ResourceUploadProps> = ({ userId = 1 }) =>
                 </Paragraph>
               </Card>
             )}
-            <Card
-              title={<Space><FileTextOutlined style={{ color: '#1677ff' }} /> Teaching Editor</Space>}
-              bordered={false}
-              style={{ borderRadius: 12 }}
-              extra={
-                <Space>
-                  <Button
-                    onClick={handleSaveDraft}
-                    loading={savingDraft}
-                    disabled={!editorDraft || editorLoading}
-                  >
-                    Save Draft
-                  </Button>
-                  <Button
-                    type="primary"
-                    onClick={handlePublishVersion}
-                    loading={publishingVersion}
-                    disabled={!editorDraft || editorLoading}
-                  >
-                    Save Version
-                  </Button>
-                  <Button
-                    icon={<DownloadOutlined />}
-                    onClick={handleExportMarkdown}
-                    loading={exportingMarkdown}
-                    disabled={!editorDraft || editorLoading}
-                  >
-                    Export Markdown
-                  </Button>
-                </Space>
-              }
-            >
-              {editorLoading && (
-                <div style={{ padding: 12 }}>
-                  <Spin />
-                </div>
-              )}
 
-              {!editorLoading && editorDraft && (
-                <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-                  <Card size="small" style={{ borderRadius: 8 }}>
-                    <Space direction="vertical" size="small" style={{ width: '100%' }}>
-                      <Space style={{ width: '100%', justifyContent: 'space-between' }}>
-                        <Text strong>Version History</Text>
-                        <Button
-                          size="small"
-                          onClick={() => taskResult?.taskId && loadMaterialVersions(taskResult.taskId)}
-                          loading={versionsLoading}
-                        >
-                          Refresh
-                        </Button>
-                      </Space>
-                      {materialVersions.length === 0 && (
-                        <Text type="secondary">No saved versions yet.</Text>
-                      )}
-                      {materialVersions.map((version) => (
-                        <Space
-                          key={`version-${version.materialId}`}
-                          style={{ width: '100%', justifyContent: 'space-between' }}
-                        >
-                          <Text type={version.materialId === editorDraft.materialId ? 'success' : undefined}>
-                            v{version.versionNo} | {version.status} {version.isLatest === 1 ? '(latest)' : ''}
-                          </Text>
-                          <Space>
-                            <Text type="secondary" style={{ fontSize: 12 }}>
-                              {version.updatedAt || '-'}
-                            </Text>
-                            <Button size="small" onClick={() => handleViewVersion(version.materialId)}>
-                              View
-                            </Button>
-                            <Button
-                              size="small"
-                              disabled={version.materialId === editorDraft.materialId && editorDraft.status === 'DRAFT'}
-                              onClick={() => handleRollbackVersion(version.materialId, version.versionNo)}
-                            >
-                              Rollback to Draft
-                            </Button>
-                          </Space>
-                        </Space>
-                      ))}
-                    </Space>
-                  </Card>
-
-                  <Alert
-                    type="info"
-                    showIcon
-                    message={`Version: ${editorDraft.versionNo || 0} | Status: ${editorDraft.status || 'DRAFT'} | Updated: ${editorDraft.updatedAt || '-'}`}
-                  />
-                  {rollbackTip && (
-                    <Alert
-                      type="warning"
-                      showIcon
-                      message={rollbackTip}
-                    />
-                  )}
-
-                  <div>
-                    <Text strong>Title</Text>
-                    <Input
-                      value={editorDraft.title}
-                      onChange={(event) => updateEditorDraft((draft) => ({ ...draft, title: event.target.value }))}
-                      maxLength={300}
-                    />
-                  </div>
-
-                  <div>
-                    <Space style={{ width: '100%', justifyContent: 'space-between', marginBottom: 6 }}>
-                      <Text strong>Lecture Notes</Text>
-                      <Space>
-                        <Button
-                          size="small"
-                          icon={<RobotOutlined />}
-                          onClick={handleExplainSelection}
-                          loading={selectionExplainLoading}
-                          disabled={!editorDraft || editorLoading}
-                        >
-                          Explain Selection
-                        </Button>
-                        <Button
-                          size="small"
-                          onClick={() => loadSelectionExplainHistory(editorDraft.materialId, editorDraft.courseId)}
-                          loading={selectionHistoryLoading}
-                        >
-                          Refresh History
-                        </Button>
-                      </Space>
-                    </Space>
-                    <TextArea
-                      value={editorDraft.lectureNotes}
-                      onChange={(event) => {
-                        setSelectedLectureText('');
-                        updateEditorDraft((draft) => ({ ...draft, lectureNotes: event.target.value }));
-                      }}
-                      onSelect={handleLectureSelection}
-                      onKeyUp={handleLectureSelection}
-                      onMouseUp={handleLectureSelection}
-                      autoSize={{ minRows: 6, maxRows: 14 }}
-                      maxLength={10000}
-                    />
-                  </div>
-
-                  {(selectionExplainResult || selectionExplainHistory.length > 0) && (
-                    <Card size="small" style={{ borderRadius: 8 }}>
-                      <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-                        {selectionExplainResult && (
-                          <Space direction="vertical" size="small" style={{ width: '100%' }}>
-                            <Space style={{ width: '100%', justifyContent: 'space-between' }}>
-                              <Text strong>Selection Explanation</Text>
-                              <Space>
-                                <Button
-                                  size="small"
-                                  icon={<CopyOutlined />}
-                                  onClick={() => handleCopySelectionExplanation(selectionExplainResult.answer)}
-                                >
-                                  Copy
-                                </Button>
-                                <Button
-                                  size="small"
-                                  type="primary"
-                                  onClick={() => handleAppendSelectionExplanation(selectionExplainResult.answer)}
-                                >
-                                  Append to Notes
-                                </Button>
-                              </Space>
-                            </Space>
-                            {!selectionExplainResult.hasReliableEvidence && (
-                              <Alert
-                                type="warning"
-                                showIcon
-                                message="No reliable knowledge-base evidence found"
-                              />
-                            )}
-                            <Paragraph style={{ whiteSpace: 'pre-wrap', marginBottom: 0 }}>
-                              {selectionExplainResult.answer}
-                            </Paragraph>
-                            <Text strong>Knowledge Evidence</Text>
-                            <Space direction="vertical" style={{ width: '100%' }}>
-                              {(selectionExplainResult.evidenceItems || []).length > 0 ? (
-                                (selectionExplainResult.evidenceItems || []).map((item, index) => (
-                                  <Alert
-                                    key={`selection-evidence-${item.evidenceType}-${item.referenceId || index}`}
-                                    type="info"
-                                    showIcon={false}
-                                    message={
-                                      <Space direction="vertical" size={2}>
-                                        <Space wrap>
-                                          <Tag color="blue">{item.evidenceType || 'EVIDENCE'}</Tag>
-                                          <Text strong>{item.title || 'Untitled'}</Text>
-                                        </Space>
-                                        <Text type="secondary">{item.summary || '-'}</Text>
-                                        {(item.source || item.sourceUrl) && (
-                                          <Text style={{ fontSize: 12 }}>
-                                            {item.source || 'Source'} {item.sourceUrl ? `| ${item.sourceUrl}` : ''}
-                                          </Text>
-                                        )}
-                                      </Space>
-                                    }
-                                  />
-                                ))
-                              ) : (
-                                <Text type="secondary">No evidence items.</Text>
-                              )}
-                            </Space>
-                          </Space>
-                        )}
-
-                        <Divider style={{ margin: '4px 0' }} />
-                        <Space style={{ width: '100%', justifyContent: 'space-between' }}>
-                          <Text strong>Explanation History</Text>
-                          <Text type="secondary" style={{ fontSize: 12 }}>
-                            Latest {selectionExplainHistory.length} records
-                          </Text>
-                        </Space>
-                        <List
-                          loading={selectionHistoryLoading}
-                          dataSource={selectionExplainHistory}
-                          locale={{ emptyText: 'No explanation history.' }}
-                          renderItem={(item) => (
-                            <List.Item
-                              actions={[
-                                <Button
-                                  key="copy"
-                                  size="small"
-                                  onClick={() => handleCopySelectionExplanation(item.answer)}
-                                >
-                                  Copy
-                                </Button>,
-                                <Button
-                                  key="append"
-                                  size="small"
-                                  onClick={() => handleAppendSelectionExplanation(item.answer)}
-                                >
-                                  Append
-                                </Button>,
-                              ]}
-                            >
-                              <List.Item.Meta
-                                title={
-                                  <Space wrap>
-                                    <Text>{item.selectedText || 'Selected text'}</Text>
-                                    {item.hasReliableEvidence ? (
-                                      <Tag color="green">Evidence</Tag>
-                                    ) : (
-                                      <Tag color="orange">No Evidence</Tag>
-                                    )}
-                                  </Space>
-                                }
-                                description={
-                                  <Space direction="vertical" size={2}>
-                                    <Text type="secondary" style={{ fontSize: 12 }}>
-                                      {item.createdAt || '-'}
-                                    </Text>
-                                    <Text style={{ whiteSpace: 'pre-wrap' }}>
-                                      {(item.answer || '').slice(0, 240)}
-                                      {(item.answer || '').length > 240 ? '...' : ''}
-                                    </Text>
-                                  </Space>
-                                }
-                              />
-                            </List.Item>
-                          )}
-                        />
-                      </Space>
-                    </Card>
-                  )}
-
-                  <Divider style={{ margin: '8px 0' }} />
-                  <Space style={{ width: '100%', justifyContent: 'space-between' }}>
-                    <Text strong>Cases</Text>
-                    <Button size="small" onClick={addCaseItem}>Add Case</Button>
-                  </Space>
-                  <Space direction="vertical" style={{ width: '100%' }}>
-                    {(editorDraft.cases || []).map((item, index) => (
-                      <Space key={`case-${index}`} align="start" style={{ width: '100%' }}>
-                        <TextArea
-                          value={item}
-                          onChange={(event) => updateCaseItem(index, event.target.value)}
-                          autoSize={{ minRows: 2, maxRows: 6 }}
-                          maxLength={2000}
-                        />
-                        <Button danger onClick={() => removeCaseItem(index)}>Remove</Button>
-                      </Space>
-                    ))}
-                  </Space>
-
-                  <Divider style={{ margin: '8px 0' }} />
-                  <Space style={{ width: '100%', justifyContent: 'space-between' }}>
-                    <Text strong>Questions</Text>
-                    <Button size="small" onClick={addQuestion}>Add Question</Button>
-                  </Space>
-                  <Space direction="vertical" style={{ width: '100%' }}>
-                    {(editorDraft.questions || []).map((question, index) => (
-                      <Card key={`question-${index}`} size="small" style={{ borderRadius: 8 }}>
-                        <Space direction="vertical" style={{ width: '100%' }}>
-                          <Input
-                            placeholder="Question stem"
-                            value={question.stem}
-                            onChange={(event) => updateQuestion(index, 'stem', event.target.value)}
-                            maxLength={2000}
-                          />
-                          <TextArea
-                            placeholder="Reference answer"
-                            value={question.referenceAnswer}
-                            onChange={(event) => updateQuestion(index, 'referenceAnswer', event.target.value)}
-                            autoSize={{ minRows: 2, maxRows: 6 }}
-                            maxLength={3000}
-                          />
-                          <Space direction="vertical" style={{ width: '100%' }}>
-                            <Text type="secondary">Scoring Points</Text>
-                            {(question.scoringPoints || []).map((point, pointIndex) => (
-                              <Space key={`question-${index}-point-${pointIndex}`} style={{ width: '100%' }}>
-                                <Input
-                                  value={point}
-                                  onChange={(event) => updateScoringPoint(index, pointIndex, event.target.value)}
-                                  maxLength={2000}
-                                />
-                                <Button danger onClick={() => removeScoringPoint(index, pointIndex)}>Remove</Button>
-                              </Space>
-                            ))}
-                            <Button size="small" onClick={() => addScoringPoint(index)}>Add Scoring Point</Button>
-                          </Space>
-                          <Button danger onClick={() => removeQuestion(index)}>Remove Question</Button>
-                        </Space>
-                      </Card>
-                    ))}
-                  </Space>
-
-                  <Divider style={{ margin: '8px 0' }} />
-                  <Text strong>Trace Summary</Text>
-                  <Space style={{ width: '100%' }} wrap>
-                    <Input
-                      placeholder="Knowledge point keyword"
-                      value={traceKnowledgeFilter}
-                      onChange={(event) => setTraceKnowledgeFilter(event.target.value)}
-                      style={{ minWidth: 220 }}
-                    />
-                    <Input
-                      placeholder="Ideology element keyword"
-                      value={traceIdeologyFilter}
-                      onChange={(event) => setTraceIdeologyFilter(event.target.value)}
-                      style={{ minWidth: 220 }}
-                    />
-                    <Button
-                      type={traceUseCourseFilter ? 'primary' : 'default'}
-                      disabled={!selectedCourseId}
-                      onClick={() => setTraceUseCourseFilter((previous) => !previous)}
-                    >
-                      Current Course
-                    </Button>
-                    <Button onClick={handleSearchTraces} loading={traceLoading}>
-                      Search
-                    </Button>
-                  </Space>
-                  <Text type="secondary" style={{ fontSize: 12 }}>
-                    Current task filter is always applied. Total records: {traceTotal}
-                  </Text>
-                  <Space direction="vertical" style={{ width: '100%' }}>
-                    {traceRows.length > 0 && traceRows.map((trace, index) => (
-                      <Card key={`trace-row-${trace.id || index}`} size="small" style={{ borderRadius: 8 }}>
-                        <Space direction="vertical" size="small">
-                          <Space wrap>
-                            <Tag color="blue">{trace.knowledgePointName || 'Unknown Point'}</Tag>
-                            <Tag color="red">{trace.ideologyElement || 'Unknown Element'}</Tag>
-                            {trace.courseId && <Tag color="gold">Course {trace.courseId}</Tag>}
-                          </Space>
-                          <Text type="secondary">{trace.evidenceSnippet || '-'}</Text>
-                          <Text style={{ fontSize: 12 }}>{trace.matchReason || '-'}</Text>
-                        </Space>
-                      </Card>
-                    ))}
-                    {traceRows.length === 0 && (editorDraft.traceItems || []).map((trace: TeachingTraceItemInfo, index) => (
-                      <Card key={`trace-fallback-${index}`} size="small" style={{ borderRadius: 8 }}>
-                        <Space direction="vertical" size="small">
-                          <Space>
-                            <Tag color="blue">{trace.knowledgePointName || 'Unknown Point'}</Tag>
-                            <Tag color="red">{trace.ideologyElement || 'Unknown Element'}</Tag>
-                          </Space>
-                          <Text type="secondary">{trace.evidenceSnippet || '-'}</Text>
-                          <Text style={{ fontSize: 12 }}>{trace.matchReason || '-'}</Text>
-                        </Space>
-                      </Card>
-                    ))}
-                    {traceRows.length === 0 && (editorDraft.traceItems || []).length === 0 && (
-                      <Text type="secondary">No trace records.</Text>
-                    )}
-                  </Space>
-                </Space>
-              )}
-            </Card>
+            <TeachingMaterialEditorCard
+              editorLoading={editorLoading}
+              editorDraft={editorDraft}
+              savingDraft={savingDraft}
+              publishingVersion={publishingVersion}
+              exportingMarkdown={exportingMarkdown}
+              versionsLoading={versionsLoading}
+              materialVersions={materialVersions}
+              rollbackTip={rollbackTip}
+              selectionExplainLoading={selectionExplainLoading}
+              selectionExplainResult={selectionExplainResult}
+              selectionExplainHistory={selectionExplainHistory}
+              selectionHistoryLoading={selectionHistoryLoading}
+              traceKnowledgeFilter={traceKnowledgeFilter}
+              traceIdeologyFilter={traceIdeologyFilter}
+              traceUseCourseFilter={traceUseCourseFilter}
+              selectedCourseId={selectedCourseId}
+              traceLoading={traceLoading}
+              traceTotal={traceTotal}
+              traceRows={traceRows}
+              onSaveDraft={handleSaveDraft}
+              onPublishVersion={handlePublishVersion}
+              onExportMarkdown={handleExportMarkdown}
+              onRefreshVersions={() => taskResult?.taskId && loadMaterialVersions(taskResult.taskId)}
+              onViewVersion={handleViewVersion}
+              onRollbackVersion={handleRollbackVersion}
+              onChangeTitle={(value) => updateEditorDraft((draft) => ({ ...draft, title: value }))}
+              onChangeLectureNotes={(value) => {
+                setSelectedLectureText('');
+                updateEditorDraft((draft) => ({ ...draft, lectureNotes: value }));
+              }}
+              onLectureSelection={handleLectureSelection}
+              onExplainSelection={handleExplainSelection}
+              onRefreshSelectionHistory={() => loadSelectionExplainHistory(editorDraft?.materialId, editorDraft?.courseId)}
+              onCopySelectionExplanation={handleCopySelectionExplanation}
+              onAppendSelectionExplanation={handleAppendSelectionExplanation}
+              onAddCase={addCaseItem}
+              onUpdateCase={updateCaseItem}
+              onRemoveCase={removeCaseItem}
+              onAddQuestion={addQuestion}
+              onUpdateQuestion={updateQuestion}
+              onRemoveQuestion={removeQuestion}
+              onUpdateScoringPoint={updateScoringPoint}
+              onAddScoringPoint={addScoringPoint}
+              onRemoveScoringPoint={removeScoringPoint}
+              onChangeTraceKnowledgeFilter={setTraceKnowledgeFilter}
+              onChangeTraceIdeologyFilter={setTraceIdeologyFilter}
+              onToggleTraceUseCourse={() => setTraceUseCourseFilter((previous) => !previous)}
+              onSearchTraces={handleSearchTraces}
+            />
           </Space>
         )}
       </div>

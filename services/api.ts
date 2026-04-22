@@ -2,6 +2,7 @@
  * Unified API client
  */
 import { BootstrapData } from '../types';
+import { downloadBlobFile } from './download';
 
 const BASE_URL = '/api';
 
@@ -12,6 +13,7 @@ interface ApiResponse<T> {
 }
 
 const TOKEN_KEY = 'smart_edu_token';
+type QueryValue = string | number | boolean | null | undefined;
 
 export function getToken(): string | null {
   return localStorage.getItem(TOKEN_KEY);
@@ -23,6 +25,34 @@ export function setToken(token: string): void {
 
 export function removeToken(): void {
   localStorage.removeItem(TOKEN_KEY);
+}
+
+function buildQueryString(params: Record<string, QueryValue>): string {
+  const search = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== '') {
+      search.set(key, String(value));
+    }
+  });
+  const query = search.toString();
+  return query ? `?${query}` : '';
+}
+
+function buildAuthHeaders(): Record<string, string> {
+  const token = getToken();
+  const headers: Record<string, string> = {};
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+  return headers;
+}
+
+async function fetchAuthenticatedBlob(url: string, errorMessage: string): Promise<Blob> {
+  const response = await fetch(url, { headers: buildAuthHeaders() });
+  if (!response.ok) {
+    throw new Error(errorMessage);
+  }
+  return response.blob();
 }
 
 async function request<T>(url: string, options: RequestInit = {}): Promise<T> {
@@ -105,33 +135,28 @@ export const dashboardApi = {
 };
 
 export const chatApi = {
-  getSessions: (userId = 1) => get<ChatSessionInfo[]>(`/chat/sessions?userId=${userId}`),
+  getSessions: (userId: number) => get<ChatSessionInfo[]>(`/chat/sessions?userId=${userId}`),
   // aiModel 对应 DeepSeek/OpenAI/Gemini 等提供商标识，后端据此路由到对应大模型
-  createSession: (title: string, userId = 1, aiModel?: string) =>
+  createSession: (title: string, userId: number, aiModel?: string) =>
     post<ChatSessionInfo>('/chat/sessions', { userId, title, aiModel }),
   getSessionDetail: (sessionId: number) =>
     get<{ sessionId: number; messages: ChatMessageInfo[] }>(`/chat/sessions/${sessionId}`),
   sendMessage: (sessionId: number, message: string) =>
     post<ChatResponseInfo>(`/chat/sessions/${sessionId}/message`, { message }),
-  explainSelection: (request: SelectionExplainRequest | string) =>
-    post<SelectionExplainResponse>(
-      '/chat/explain-selection',
-      typeof request === 'string' ? { text: request } : request,
-    ),
+  explainSelection: (request: SelectionExplainRequest) =>
+    post<SelectionExplainResponse>('/chat/explain-selection', request),
   getSelectionExplainHistory: (
     params: { userId?: number; materialId?: number | null; courseId?: number | null; page?: number; size?: number } = {},
-  ) => {
-    const search = new URLSearchParams();
-    if (params.userId !== undefined) search.set('userId', String(params.userId));
-    if (params.materialId !== undefined && params.materialId !== null) search.set('materialId', String(params.materialId));
-    if (params.courseId !== undefined && params.courseId !== null) search.set('courseId', String(params.courseId));
-    if (params.page !== undefined) search.set('page', String(params.page));
-    if (params.size !== undefined) search.set('size', String(params.size));
-    const query = search.toString();
-    return get<PageResultInfo<SelectionExplainHistoryInfo>>(
-      `/chat/explain-selection/history${query ? `?${query}` : ''}`
-    );
-  },
+  ) =>
+    get<PageResultInfo<SelectionExplainHistoryInfo>>(
+      `/chat/explain-selection/history${buildQueryString({
+        userId: params.userId,
+        materialId: params.materialId,
+        courseId: params.courseId,
+        page: params.page,
+        size: params.size,
+      })}`
+    ),
   deleteSession: (sessionId: number) => del<void>(`/chat/sessions/${sessionId}`),
 };
 
@@ -160,7 +185,9 @@ export const knowledgeApi = {
 export const courseApi = {
   getKnowledgePoints: (courseId: number) =>
     get<KnowledgeNodeInfo[]>(`/courses/${courseId}/knowledge-points`),
-  create: (data: { name: string; code?: string; description?: string; semester?: string; teacherId?: number }) =>
+  getMaterials: (courseId: number) =>
+    get<CourseTeachingMaterialGroupInfo[]>(`/courses/${courseId}/materials`),
+  create: (data: { name: string; code?: string; description?: string; semester?: string; teacherId: number }) =>
     post<CourseInfo>('/courses', data),
 };
 
@@ -173,7 +200,7 @@ export const userApi = {
 };
 
 export const uploadApi = {
-  uploadFile: (file: File, userId = 1, courseId?: number) => {
+  uploadFile: (file: File, userId: number, courseId?: number) => {
     const formData = new FormData();
     formData.append('file', file);
     formData.append('userId', String(userId));
@@ -195,18 +222,16 @@ export const uploadApi = {
   getTaskTraces: (
     taskId: number,
     params: { courseId?: number; knowledgePoint?: string; ideologyElement?: string; page?: number; size?: number } = {},
-  ) => {
-    const search = new URLSearchParams();
-    if (params.courseId !== undefined) search.set('courseId', String(params.courseId));
-    if (params.knowledgePoint) search.set('knowledgePoint', params.knowledgePoint);
-    if (params.ideologyElement) search.set('ideologyElement', params.ideologyElement);
-    if (params.page !== undefined) search.set('page', String(params.page));
-    if (params.size !== undefined) search.set('size', String(params.size));
-    const query = search.toString();
-    return get<PageResultInfo<TeachingMaterialTraceInfo>>(
-      `/upload/tasks/${taskId}/traces${query ? `?${query}` : ''}`
-    );
-  },
+  ) =>
+    get<PageResultInfo<TeachingMaterialTraceInfo>>(
+      `/upload/tasks/${taskId}/traces${buildQueryString({
+        courseId: params.courseId,
+        knowledgePoint: params.knowledgePoint,
+        ideologyElement: params.ideologyElement,
+        page: params.page,
+        size: params.size,
+      })}`
+    ),
   rollbackMaterialVersion: (taskId: number, materialId: number) =>
     post<TeachingMaterialDraftInfo>(`/upload/tasks/${taskId}/rollback/${materialId}`),
 };
@@ -216,29 +241,17 @@ export const materialApi = {
   getTraces: (
     materialId: number,
     params: { knowledgePoint?: string; ideologyElement?: string; page?: number; size?: number } = {},
-  ) => {
-    const search = new URLSearchParams();
-    if (params.knowledgePoint) search.set('knowledgePoint', params.knowledgePoint);
-    if (params.ideologyElement) search.set('ideologyElement', params.ideologyElement);
-    if (params.page !== undefined) search.set('page', String(params.page));
-    if (params.size !== undefined) search.set('size', String(params.size));
-    const query = search.toString();
-    return get<PageResultInfo<TeachingMaterialTraceInfo>>(
-      `/materials/${materialId}/traces${query ? `?${query}` : ''}`
-    );
-  },
-  exportMarkdown: async (materialId: number): Promise<Blob> => {
-    const token = getToken();
-    const headers: Record<string, string> = {};
-    if (token) {
-      headers.Authorization = `Bearer ${token}`;
-    }
-    const response = await fetch(`/api/materials/${materialId}/export/markdown`, { headers });
-    if (!response.ok) {
-      throw new Error('Failed to export markdown');
-    }
-    return response.blob();
-  },
+  ) =>
+    get<PageResultInfo<TeachingMaterialTraceInfo>>(
+      `/materials/${materialId}/traces${buildQueryString({
+        knowledgePoint: params.knowledgePoint,
+        ideologyElement: params.ideologyElement,
+        page: params.page,
+        size: params.size,
+      })}`
+    ),
+  exportMarkdown: (materialId: number): Promise<Blob> =>
+    fetchAuthenticatedBlob(`/api/materials/${materialId}/export/markdown`, 'Failed to export markdown'),
 };
 
 /**
@@ -274,24 +287,11 @@ export const knowledgeExcelApi = {
    * 下载 Excel 模板（浏览器下载，返回 Blob）
    */
   downloadTemplate: async (): Promise<void> => {
-    const token = getToken();
-    const headers: Record<string, string> = {};
-    if (token) {
-      headers.Authorization = `Bearer ${token}`;
-    }
-    const response = await fetch('/api/knowledge/excel/template', { headers });
-    if (!response.ok) {
-      throw new Error('下载模板失败');
-    }
-    const blob = await response.blob();
-    const url = window.URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = '知识图谱导入模板.xlsx';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    window.URL.revokeObjectURL(url);
+    const templateBlob = await fetchAuthenticatedBlob('/api/knowledge/excel/template', 'Failed to download the template');
+    downloadBlobFile(templateBlob, 'knowledge-graph-template.xlsx');
+    return;
+    const blob = await fetchAuthenticatedBlob('/api/knowledge/excel/template', '下载模板失败');
+    downloadBlobFile(blob, '知识图谱导入模板.xlsx');
   },
 
   /**
@@ -389,7 +389,7 @@ export interface KnowledgeContextInfo {
 
 export interface SelectionExplainRequest {
   text: string;
-  userId?: number;
+  userId: number;
   courseId?: number | null;
   materialId?: number | null;
   parseTaskId?: number | null;
@@ -620,6 +620,18 @@ export interface MaterialVersionItemInfo {
   status: string;
   isLatest: number;
   updatedAt?: string;
+}
+
+export interface CourseTeachingMaterialGroupInfo {
+  parseTaskId: number;
+  courseId: number;
+  displayTitle: string;
+  sourceFileName: string;
+  latestMaterialId: number;
+  latestVersionNo: number;
+  latestStatus: string;
+  updatedAt?: string;
+  versions: MaterialVersionItemInfo[];
 }
 
 export interface TeachingMaterialTraceInfo {

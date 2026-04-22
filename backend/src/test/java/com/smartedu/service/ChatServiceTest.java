@@ -57,12 +57,14 @@ class ChatServiceTest {
 
         SelectionExplainRequestDto request = new SelectionExplainRequestDto();
         request.setText("unknown concept");
+        request.setUserId(8L);
 
         var response = service.explainSelection(request);
 
         assertFalse(response.getHasReliableEvidence());
         assertEquals(0, response.getEvidenceItems().size());
         assertEquals(0, store.records.get(0).getHasReliableEvidence());
+        assertEquals(8L, store.records.get(0).getUserId());
     }
 
     @Test

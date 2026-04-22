@@ -17,15 +17,17 @@ import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.RequestBody;
 import okhttp3.Response;
+import okhttp3.ResponseBody;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
+import java.io.BufferedReader;
 import java.io.IOException;
+import java.net.URI;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -128,11 +130,8 @@ public class AiIntelligenceService {
     private int geminiTimeout;
 
     // AI 路由与熔断配置
-    @Value("${ai.routing.default-chat-provider:proxy}")
+    @Value("${ai.routing.default-chat-provider:openai}")
     private String defaultChatProvider;
-
-    @Value("#{'${ai.routing.background-providers:proxy,deepseek,openai}'.split(',')}")
-    private List<String> backgroundProviders;
 
     @Value("${ai.routing.failure-threshold:3}")
     private int failureThreshold;
@@ -261,6 +260,7 @@ public class AiIntelligenceService {
             List<Map<String, String>> messages,
             String systemPrompt,
             String providerLabel) {
+        List<String> errors = new ArrayList<>();
         try {
             OkHttpClient client = new OkHttpClient.Builder()
                     .connectTimeout(timeout, TimeUnit.SECONDS)
@@ -268,48 +268,158 @@ public class AiIntelligenceService {
                     .writeTimeout(timeout, TimeUnit.SECONDS)
                     .build();
 
-            List<Map<String, String>> allMessages = new ArrayList<>();
-            if (systemPrompt != null && !systemPrompt.isEmpty()) {
-                Map<String, String> sysMsg = new HashMap<>();
-                sysMsg.put("role", "system");
-                sysMsg.put("content", systemPrompt);
-                allMessages.add(sysMsg);
+            if (shouldPreferResponsesApi(apiBase, model)) {
+                try {
+                    return callResponsesApi(client, apiBase, apiKey, model, messages, systemPrompt, providerLabel);
+                } catch (RuntimeException ex) {
+                    errors.add("responses: " + ex.getMessage());
+                    log.warn("{} responses API failed, fallback to chat completions", providerLabel, ex);
+                }
             }
-            allMessages.addAll(messages);
 
-            Map<String, Object> requestBody = new HashMap<>();
-            requestBody.put("model", model);
-            requestBody.put("messages", allMessages);
-            requestBody.put("temperature", DEFAULT_TEMPERATURE);
-            requestBody.put("max_tokens", DEFAULT_MAX_TOKENS);
-
-            String endpoint = buildChatCompletionUrl(apiBase);
-            String jsonBody = objectMapper.writeValueAsString(requestBody);
-
-            Request request = new Request.Builder()
-                    .url(endpoint)
-                    .addHeader("Authorization", "Bearer " + apiKey)
-                    .addHeader("Content-Type", "application/json")
-                    .post(RequestBody.create(jsonBody, JSON_MEDIA_TYPE))
-                    .build();
-
-            try (Response response = client.newCall(request).execute()) {
-                String responseBody = response.body() == null ? "" : response.body().string();
-                if (!response.isSuccessful()) {
-                    log.error("{} API call failed: status={}, body={}", providerLabel, response.code(), responseBody);
-                    throw new RuntimeException("AI service call failed: " + response.code());
-                }
-
-                JsonNode jsonNode = objectMapper.readTree(responseBody);
-                String content = jsonNode.path("choices").path(0).path("message").path("content").asText();
-                if (content == null || content.isBlank()) {
-                    throw new RuntimeException("AI service returned empty content");
-                }
-                return content;
+            try {
+                return callChatCompletionsApi(client, apiBase, apiKey, model, messages, systemPrompt, providerLabel);
+            } catch (RuntimeException ex) {
+                errors.add("chat.completions: " + ex.getMessage());
+                throw new RuntimeException(String.join(" | ", errors), ex);
             }
         } catch (IOException e) {
             log.error("{} API call exception", providerLabel, e);
             throw new RuntimeException("AI service call failed: " + e.getMessage(), e);
+        }
+    }
+
+    private String callChatCompletionsApi(
+            OkHttpClient client,
+            String apiBase,
+            String apiKey,
+            String model,
+            List<Map<String, String>> messages,
+            String systemPrompt,
+            String providerLabel) throws IOException {
+        List<Map<String, String>> allMessages = new ArrayList<>();
+        if (systemPrompt != null && !systemPrompt.isEmpty()) {
+            Map<String, String> sysMsg = new HashMap<>();
+            sysMsg.put("role", "system");
+            sysMsg.put("content", systemPrompt);
+            allMessages.add(sysMsg);
+        }
+        allMessages.addAll(messages);
+
+        Map<String, Object> requestBody = new HashMap<>();
+        requestBody.put("model", model);
+        requestBody.put("messages", allMessages);
+        requestBody.put("temperature", DEFAULT_TEMPERATURE);
+        if (shouldUseMaxCompletionTokens(model)) {
+            requestBody.put("max_completion_tokens", DEFAULT_MAX_TOKENS);
+        } else {
+            requestBody.put("max_tokens", DEFAULT_MAX_TOKENS);
+        }
+        // 强制使用 SSE 流式：本地 Codex/ChatGPT 兼容代理在非流式下会返回 content=null，
+        // 仅在 stream:true 时通过 delta.content 推送真实文本；其他官方/兼容服务也支持流式，
+        // 因此统一走流式可以同时覆盖代理与官方接口。
+        requestBody.put("stream", true);
+
+        String endpoint = buildChatCompletionUrl(apiBase);
+        String jsonBody = objectMapper.writeValueAsString(requestBody);
+
+        Request request = new Request.Builder()
+                .url(endpoint)
+                .addHeader("Authorization", "Bearer " + apiKey)
+                .addHeader("Content-Type", "application/json")
+                .addHeader("Accept", "text/event-stream")
+                .post(RequestBody.create(jsonBody, JSON_MEDIA_TYPE))
+                .build();
+
+        try (Response response = client.newCall(request).execute()) {
+            if (!response.isSuccessful()) {
+                String errorBody = response.body() == null ? "" : response.body().string();
+                log.error("{} chat completions failed: status={}, body={}", providerLabel, response.code(), errorBody);
+                throw new RuntimeException(buildHttpErrorMessage(response.code(), errorBody));
+            }
+
+            String content = readChatCompletionStream(response.body());
+            if (content.isBlank()) {
+                throw new RuntimeException("empty assistant content from chat.completions");
+            }
+            return content;
+        }
+    }
+
+    /**
+     * 解析 OpenAI 兼容协议的 SSE 流，将 choices[0].delta.content 追加为完整文本。
+     * 兼容 content 为字符串或 [{"type":"text","text":"..."}] 数组的两种格式。
+     */
+    private String readChatCompletionStream(ResponseBody body) throws IOException {
+        if (body == null) {
+            return "";
+        }
+        StringBuilder builder = new StringBuilder();
+        try (BufferedReader reader = new BufferedReader(body.charStream())) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                if (line.isEmpty() || !line.startsWith("data:")) {
+                    continue;
+                }
+                String payload = line.substring(5).trim();
+                if (payload.isEmpty() || "[DONE]".equals(payload)) {
+                    if ("[DONE]".equals(payload)) {
+                        break;
+                    }
+                    continue;
+                }
+                try {
+                    JsonNode chunk = objectMapper.readTree(payload);
+                    JsonNode delta = chunk.path("choices").path(0).path("delta").path("content");
+                    String piece = extractTextContent(delta);
+                    if (!piece.isEmpty()) {
+                        builder.append(piece);
+                    }
+                } catch (IOException ignored) {
+                    // 忽略畸形 chunk，继续读取剩余事件
+                }
+            }
+        }
+        return builder.toString().trim();
+    }
+
+    private String callResponsesApi(
+            OkHttpClient client,
+            String apiBase,
+            String apiKey,
+            String model,
+            List<Map<String, String>> messages,
+            String systemPrompt,
+            String providerLabel) throws IOException {
+        Map<String, Object> requestBody = new HashMap<>();
+        requestBody.put("model", model);
+        requestBody.put("input", messages);
+        requestBody.put("instructions", systemPrompt);
+        requestBody.put("max_output_tokens", DEFAULT_MAX_TOKENS);
+
+        String endpoint = buildResponsesUrl(apiBase);
+        String jsonBody = objectMapper.writeValueAsString(requestBody);
+
+        Request request = new Request.Builder()
+                .url(endpoint)
+                .addHeader("Authorization", "Bearer " + apiKey)
+                .addHeader("Content-Type", "application/json")
+                .post(RequestBody.create(jsonBody, JSON_MEDIA_TYPE))
+                .build();
+
+        try (Response response = client.newCall(request).execute()) {
+            String responseBody = response.body() == null ? "" : response.body().string();
+            if (!response.isSuccessful()) {
+                log.error("{} responses API failed: status={}, body={}", providerLabel, response.code(), responseBody);
+                throw new RuntimeException(buildHttpErrorMessage(response.code(), responseBody));
+            }
+
+            JsonNode jsonNode = objectMapper.readTree(responseBody);
+            String content = extractResponsesContent(jsonNode);
+            if (content.isBlank()) {
+                throw new RuntimeException("empty assistant content from responses");
+            }
+            return content;
         }
     }
 
@@ -325,32 +435,30 @@ public class AiIntelligenceService {
         return normalized + "/chat/completions";
     }
 
+    private String buildResponsesUrl(String apiBase) {
+        if (apiBase == null || apiBase.isBlank()) {
+            throw new RuntimeException("AI service base-url is missing");
+        }
+
+        String normalized = apiBase.endsWith("/") ? apiBase.substring(0, apiBase.length() - 1) : apiBase;
+        if (normalized.endsWith("/responses")) {
+            return normalized;
+        }
+        return normalized + "/responses";
+    }
+
     /**
      * 后台任务默认链路。
      */
     private List<String> buildBackgroundProviderChain() {
-        List<String> providers = deduplicateProviders(backgroundProviders);
-        if (providers.isEmpty()) {
-            providers.add(normalizeProviderKey(defaultChatProvider));
-        }
-        return providers;
+        return List.of(resolveUnifiedProviderKey(defaultChatProvider));
     }
 
     /**
      * 对话场景链路。
      */
     private List<String> buildPreferredProviderChain(String preferredProvider) {
-        String normalized = normalizeProviderKey(preferredProvider);
-        if (normalized.isBlank() || "default".equals(normalized)) {
-            List<String> providers = new ArrayList<>();
-            providers.add(defaultChatProvider);
-            providers.addAll(backgroundProviders);
-            return deduplicateProviders(providers);
-        }
-
-        List<String> providers = new ArrayList<>();
-        providers.add(normalized);
-        return providers;
+        return List.of(resolveUnifiedProviderKey(preferredProvider));
     }
 
     /**
@@ -499,23 +607,197 @@ public class AiIntelligenceService {
     }
 
     /**
-     * 去重时保留顺序，确保回退链路可控。
+     * The user requires one runtime AI endpoint for chat and every background AI workflow,
+     * so legacy provider aliases are normalized to the local OpenAI-compatible config.
      */
-    private List<String> deduplicateProviders(List<String> providers) {
-        LinkedHashSet<String> deduplicated = new LinkedHashSet<>();
-        if (providers == null) {
-            return new ArrayList<>();
+    private String resolveUnifiedProviderKey(String providerKey) {
+        String normalized = normalizeProviderKey(providerKey);
+        if (normalized.isBlank()
+                || "default".equals(normalized)
+                || "proxy".equals(normalized)
+                || "deepseek".equals(normalized)
+                || "gemini".equals(normalized)) {
+            return "openai";
         }
-
-        for (String provider : providers) {
-            String normalized = normalizeProviderKey(provider);
-            if (!normalized.isBlank()) {
-                deduplicated.add(normalized);
-            }
-        }
-        return new ArrayList<>(deduplicated);
+        return normalized;
     }
 
+    private boolean shouldPreferResponsesApi(String model) {
+        String normalizedModel = normalizeModelName(model);
+        return normalizedModel.startsWith("gpt-5")
+                || normalizedModel.startsWith("o1")
+                || normalizedModel.startsWith("o3")
+                || normalizedModel.startsWith("o4");
+    }
+
+    /**
+     * The localhost OpenAI-compatible proxy exposes GPT-5 text only via streaming
+     * chat.completions, so /responses must be skipped there to avoid a guaranteed empty call.
+     */
+    private boolean shouldPreferResponsesApi(String apiBase, String model) {
+        return shouldPreferResponsesApi(model) && !isLocalCompatibleBaseUrl(apiBase);
+    }
+
+    private boolean shouldUseMaxCompletionTokens(String model) {
+        return shouldPreferResponsesApi(model);
+    }
+
+    private String normalizeModelName(String model) {
+        if (model == null) {
+            return "";
+        }
+        return model.trim().toLowerCase();
+    }
+
+    private boolean isLocalCompatibleBaseUrl(String apiBase) {
+        if (apiBase == null || apiBase.isBlank()) {
+            return false;
+        }
+        try {
+            URI uri = URI.create(apiBase.trim());
+            String host = uri.getHost();
+            if (host == null || host.isBlank()) {
+                return false;
+            }
+            String normalizedHost = host.trim().toLowerCase();
+            return "localhost".equals(normalizedHost)
+                    || "127.0.0.1".equals(normalizedHost)
+                    || "::1".equals(normalizedHost);
+        } catch (IllegalArgumentException ex) {
+            String normalized = apiBase.trim().toLowerCase();
+            return normalized.contains("://localhost")
+                    || normalized.contains("://127.0.0.1")
+                    || normalized.contains("[::1]");
+        }
+    }
+
+    private String buildHttpErrorMessage(int statusCode, String responseBody) {
+        String serviceMessage = extractServiceErrorMessage(responseBody);
+        if (serviceMessage.isBlank()) {
+            return "AI service call failed: " + statusCode;
+        }
+        return "AI service call failed: " + statusCode + " - " + serviceMessage;
+    }
+
+    private String extractServiceErrorMessage(String responseBody) {
+        if (responseBody == null || responseBody.isBlank()) {
+            return "";
+        }
+        try {
+            JsonNode node = objectMapper.readTree(responseBody);
+            if (node.path("error").isTextual()) {
+                return node.path("error").asText();
+            }
+            if (node.path("error").path("message").isTextual()) {
+                return node.path("error").path("message").asText();
+            }
+            if (node.path("message").isTextual()) {
+                return node.path("message").asText();
+            }
+        } catch (Exception ignored) {
+            return responseBody;
+        }
+        return responseBody;
+    }
+
+    private String extractChatCompletionContent(JsonNode jsonNode) {
+        if (jsonNode == null) {
+            return "";
+        }
+        JsonNode choiceNode = jsonNode.path("choices").path(0);
+        if (choiceNode.isMissingNode()) {
+            return "";
+        }
+
+        String messageContent = extractTextContent(choiceNode.path("message").path("content"));
+        if (!messageContent.isBlank()) {
+            return messageContent;
+        }
+
+        return extractTextContent(choiceNode.path("text"));
+    }
+
+    private String extractResponsesContent(JsonNode jsonNode) {
+        if (jsonNode == null) {
+            return "";
+        }
+
+        String directOutput = extractTextContent(jsonNode.path("output_text"));
+        if (!directOutput.isBlank()) {
+            return directOutput;
+        }
+
+        JsonNode outputNode = jsonNode.path("output");
+        if (!outputNode.isArray()) {
+            return "";
+        }
+
+        StringBuilder builder = new StringBuilder();
+        for (JsonNode outputItem : outputNode) {
+            String itemText = extractTextContent(outputItem.path("text"));
+            if (!itemText.isBlank()) {
+                appendWithNewline(builder, itemText);
+            }
+
+            JsonNode contentNode = outputItem.path("content");
+            if (!contentNode.isArray()) {
+                continue;
+            }
+            for (JsonNode contentItem : contentNode) {
+                String text = extractTextContent(contentItem.path("text"));
+                if (!text.isBlank()) {
+                    appendWithNewline(builder, text);
+                }
+                String outputText = extractTextContent(contentItem.path("output_text"));
+                if (!outputText.isBlank()) {
+                    appendWithNewline(builder, outputText);
+                }
+            }
+        }
+        return builder.toString().trim();
+    }
+
+    private String extractTextContent(JsonNode node) {
+        if (node == null || node.isMissingNode() || node.isNull()) {
+            return "";
+        }
+        if (node.isTextual()) {
+            return node.asText().trim();
+        }
+        if (!node.isArray()) {
+            return "";
+        }
+
+        StringBuilder builder = new StringBuilder();
+        for (JsonNode item : node) {
+            if (item.isTextual()) {
+                appendWithNewline(builder, item.asText());
+                continue;
+            }
+            if ("text".equals(item.path("type").asText())) {
+                appendWithNewline(builder, item.path("text").asText());
+                continue;
+            }
+            if (item.path("text").isTextual()) {
+                appendWithNewline(builder, item.path("text").asText());
+            }
+        }
+        return builder.toString().trim();
+    }
+
+    private void appendWithNewline(StringBuilder builder, String value) {
+        if (value == null || value.isBlank()) {
+            return;
+        }
+        if (!builder.isEmpty()) {
+            builder.append('\n');
+        }
+        builder.append(value.trim());
+    }
+
+    /**
+     * 去重时保留顺序，确保回退链路可控。
+     */
     /**
      * 提取专业内容中的思政价值。
      */

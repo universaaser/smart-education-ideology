@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(curl *)",
+      "Bash(mvn -q -DskipTests compile)",
+      "Bash(mvn -q -Dtest=AiIntelligenceServiceTest test)",
+      "Bash(mvn -Dtest=AiIntelligenceServiceTest test)"
+    ]
+  }
+}

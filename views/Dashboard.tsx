@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { View } from '../types';
 import { dashboardApi, CourseInfo, ActivityInfo, TrendItem } from '../services/api';
 import {
@@ -8,7 +8,7 @@ import {
 import {
   RobotOutlined, CloudUploadOutlined, WarningOutlined,
   ShareAltOutlined, InfoCircleOutlined, RiseOutlined,
-  ExportOutlined, EditOutlined, BookOutlined
+  ExportOutlined, EditOutlined
 } from '@ant-design/icons';
 
 const { Title, Text } = Typography;
@@ -38,7 +38,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onChangeView }) => {
         setActivities(activitiesData || []);
         setTrendData(trendResult || []);
       } catch {
-        // NOTE: 后端未连接时保持空状态，页面照常渲染
+        // Keep the page renderable when the backend is unavailable.
       } finally {
         setLoading(false);
       }
@@ -46,7 +46,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ onChangeView }) => {
     loadData();
   }, []);
 
-  /** 根据活动类型返回对应的显示样式 */
   const getActivityStyle = (type: string) => {
     switch (type) {
       case 'AI_ANALYSIS': return { icon: <RobotOutlined />, color: 'var(--color-primary)', bg: 'var(--color-primary-soft)' };
@@ -63,14 +62,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ onChangeView }) => {
       <div style={{ display: 'flex', flex: 1, alignItems: 'center', justifyContent: 'center', height: '100%' }}>
         <Space direction="vertical" align="center">
           <Spin size="large" />
-          <Text type="secondary">加载仪表盘数据...</Text>
+          <Text type="secondary">Loading dashboard data...</Text>
         </Space>
       </div>
     );
   }
 
-  // 计算折线图
-  const maxTrend = trendData.length > 0 ? Math.max(...trendData.map(t => t.value), 1) : 100;
+  const maxTrend = trendData.length > 0 ? Math.max(...trendData.map(item => item.value), 1) : 100;
   const chartWidth = 600;
   const chartHeight = 250;
   const chartPadding = { top: 20, right: 20, bottom: 40, left: 50 };
@@ -84,9 +82,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ onChangeView }) => {
   };
 
   const linePath = trendData.length > 0
-    ? trendData.map((item, i) => {
-      const { x, y } = getPoint(i, item.value);
-      return `${i === 0 ? 'M' : 'L'} ${x} ${y}`;
+    ? trendData.map((item, index) => {
+      const { x, y } = getPoint(index, item.value);
+      return `${index === 0 ? 'M' : 'L'} ${x} ${y}`;
     }).join(' ')
     : '';
 
@@ -98,18 +96,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ onChangeView }) => {
 
   const mapGradeColor = (color: string) => {
     const mapping: Record<string, string> = {
-      'orange': 'warning',
-      'emerald': 'success',
-      'blue': 'processing',
-      'red': 'error',
+      orange: 'warning',
+      emerald: 'success',
+      blue: 'processing',
+      red: 'error',
     };
     return mapping[color] || 'default';
   };
 
-  /**
-   * 将后端返回的 unknown 统计值转为 Statistic 可接受的数值类型。
-   * 仅对可安全转换的字符串执行 Number 转换，其他情况回落到占位符。
-   */
   const toStatisticValue = (value: unknown, fallback: string | number = '--'): string | number => {
     if (typeof value === 'number') return value;
     if (typeof value === 'string' && value.trim() !== '') {
@@ -121,20 +115,20 @@ export const Dashboard: React.FC<DashboardProps> = ({ onChangeView }) => {
 
   const columns = [
     {
-      title: '课程名称',
+      title: 'Course',
       dataIndex: 'name',
       key: 'name',
-      render: (name: string, record: CourseInfo) => (
+      render: (name: string) => (
         <Space>
           <Avatar shape="square" style={{ backgroundColor: 'var(--color-primary-soft)', color: 'var(--color-primary)' }}>
-            {name?.charAt(0) || '课'}
+            {name?.charAt(0) || 'C'}
           </Avatar>
           <Text strong>{name}</Text>
         </Space>
       ),
     },
     {
-      title: '进度',
+      title: 'Progress',
       dataIndex: 'progress',
       key: 'progress',
       render: (progress: number) => (
@@ -142,7 +136,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onChangeView }) => {
       ),
     },
     {
-      title: '思政融合度',
+      title: 'Ideology Score',
       dataIndex: 'gradeLabel',
       key: 'gradeLabel',
       render: (text: string, record: CourseInfo) => (
@@ -150,7 +144,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onChangeView }) => {
       ),
     },
     {
-      title: '操作',
+      title: 'Action',
       key: 'action',
       align: 'right' as const,
       render: () => (
@@ -162,24 +156,21 @@ export const Dashboard: React.FC<DashboardProps> = ({ onChangeView }) => {
   return (
     <div style={{ flex: 1, overflowY: 'auto', padding: '32px' }}>
       <div style={{ maxWidth: 1200, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '32px' }}>
-        
-        {/* 欢迎区 */}
         <Row justify="space-between" align="bottom">
           <Col>
-            <Title level={2} style={{ margin: 0, fontFamily: "'Lexend', sans-serif" }}>欢迎回来 👋</Title>
-            <Text type="secondary">这里是今日的教学概览与思政融合分析数据。</Text>
+            <Title level={2} style={{ margin: 0, fontFamily: "'Lexend', sans-serif" }}>Welcome back</Title>
+            <Text type="secondary">Here is today's teaching overview and curriculum ideology analysis.</Text>
           </Col>
           <Col>
-            <Button icon={<RobotOutlined />}>生成总结</Button>
+            <Button icon={<RobotOutlined />}>Generate Summary</Button>
           </Col>
         </Row>
 
-        {/* 统计卡片 */}
         <Row gutter={[24, 24]}>
           <Col xs={24} sm={12} lg={6}>
             <Card bordered={false} hoverable>
               <Statistic
-                title="思政融入率"
+                title="Ideology Integration Rate"
                 value={toStatisticValue(stats.ideologyRate)}
                 suffix="%"
                 valueStyle={{ color: 'var(--color-text-primary)', fontWeight: 'bold' }}
@@ -187,55 +178,55 @@ export const Dashboard: React.FC<DashboardProps> = ({ onChangeView }) => {
               />
               <div style={{ marginTop: 8, fontSize: 13 }}>
                 <Text type="success"><RiseOutlined /> </Text>
-                <Text type="secondary" style={{ marginLeft: 4 }}>知识点思政映射</Text>
+                <Text type="secondary" style={{ marginLeft: 4 }}>Knowledge-point ideology mapping</Text>
               </div>
             </Card>
           </Col>
           <Col xs={24} sm={12} lg={6}>
             <Card bordered={false} hoverable>
               <Statistic
-                title="思政元素挖掘数"
+                title="Ideology Findings"
                 value={toStatisticValue(stats.ideologyCount)}
                 valueStyle={{ color: 'var(--color-text-primary)', fontWeight: 'bold' }}
                 prefix={<RobotOutlined style={{ color: 'var(--color-error)', marginRight: 8 }} />}
               />
               <div style={{ marginTop: 8, fontSize: 13 }}>
                 <Text type="success"><RiseOutlined /> </Text>
-                <Text type="secondary" style={{ marginLeft: 4 }}>已关联知识点</Text>
+                <Text type="secondary" style={{ marginLeft: 4 }}>Linked knowledge points</Text>
               </div>
             </Card>
           </Col>
           <Col xs={24} sm={12} lg={6}>
             <Card bordered={false} hoverable>
               <Statistic
-                title="学生互动活跃度"
+                title="Student Activity"
                 value={toStatisticValue(stats.studentActivity)}
                 valueStyle={{ color: 'var(--color-text-primary)', fontWeight: 'bold' }}
                 prefix={<InfoCircleOutlined style={{ color: '#8b5cf6', marginRight: 8 }} />}
               />
               <div style={{ marginTop: 8, fontSize: 13 }}>
                 <Text type="success"><RiseOutlined /> </Text>
-                <Text type="secondary" style={{ marginLeft: 4 }}>学习行为记录</Text>
+                <Text type="secondary" style={{ marginLeft: 4 }}>Learning activity records</Text>
               </div>
             </Card>
           </Col>
           <Col xs={24} sm={12} lg={6}>
-            <Card 
-              bordered={false} 
-              hoverable 
+            <Card
+              bordered={false}
+              hoverable
               onClick={() => onChangeView(View.KNOWLEDGE_GRAPH)}
               style={{ cursor: 'pointer', border: '1px solid transparent' }}
             >
               <Statistic
-                title="待处理预警"
+                title="Open Alerts"
                 value={toStatisticValue(stats.alertCount, 0)}
                 valueStyle={{ color: 'var(--color-text-primary)', fontWeight: 'bold' }}
                 prefix={<WarningOutlined style={{ color: '#f59e0b', marginRight: 8 }} />}
               />
               <div style={{ marginTop: 8, fontSize: 13, display: 'flex', justifyContent: 'space-between' }}>
                 <div>
-                  <Text type="warning">需关注 </Text>
-                  <Text type="secondary" style={{ marginLeft: 4 }}>课程内容审核</Text>
+                  <Text type="warning">Attention needed</Text>
+                  <Text type="secondary" style={{ marginLeft: 4 }}>Course content review</Text>
                 </div>
                 <ExportOutlined style={{ color: 'var(--color-text-tertiary)' }} />
               </div>
@@ -243,15 +234,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ onChangeView }) => {
           </Col>
         </Row>
 
-        {/* 趋势图 + 动态 */}
         <Row gutter={[24, 24]}>
           <Col xs={24} lg={16}>
-            <Card 
-              title="思政融入趋势分析" 
-              bordered={false} 
+            <Card
+              title="Ideology Integration Trend"
+              bordered={false}
               bodyStyle={{ padding: 24 }}
               style={{ height: '100%' }}
-              extra={<Text type="secondary">已融入思政元素的知识点百分比变化</Text>}
+              extra={<Text type="secondary">Percentage trend of knowledge points with ideology integration</Text>}
             >
               <div style={{ minHeight: 300, width: '100%' }}>
                 {trendData.length > 0 ? (
@@ -286,10 +276,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ onChangeView }) => {
                       strokeLinecap="round"
                       strokeLinejoin="round"
                     />
-                    {trendData.map((item, i) => {
-                      const { x, y } = getPoint(i, item.value);
+                    {trendData.map((item, index) => {
+                      const { x, y } = getPoint(index, item.value);
                       return (
-                        <g key={i}>
+                        <g key={index}>
                           <circle cx={x} cy={y} r={4} fill="var(--color-primary)" stroke="white" strokeWidth={2} />
                           <text
                             x={x} y={chartHeight - 10}
@@ -305,13 +295,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ onChangeView }) => {
                     })}
                   </svg>
                 ) : (
-                  <Empty description="暂无趋势数据" style={{ marginTop: 60 }} />
+                  <Empty description="No trend data" style={{ marginTop: 60 }} />
                 )}
               </div>
             </Card>
           </Col>
           <Col xs={24} lg={8}>
-            <Card title="最新动态" bordered={false} bodyStyle={{ padding: '0 24px', height: 350, overflowY: 'auto' }}>
+            <Card title="Latest Activity" bordered={false} bodyStyle={{ padding: '0 24px', height: 350, overflowY: 'auto' }}>
               {activities.length > 0 ? (
                 <List<ActivityInfo>
                   itemLayout="horizontal"
@@ -335,23 +325,21 @@ export const Dashboard: React.FC<DashboardProps> = ({ onChangeView }) => {
                   }}
                 />
               ) : (
-                <Empty description="暂无动态" style={{ marginTop: 80 }} />
+                <Empty description="No activity yet" style={{ marginTop: 80 }} />
               )}
             </Card>
           </Col>
         </Row>
 
-        {/* 课程列表 */}
-        <Card title="我的课程" bordered={false} bodyStyle={{ padding: 0 }}>
-          <Table 
-            columns={columns} 
-            dataSource={courses} 
-            rowKey="id" 
-            pagination={false} 
-            locale={{ emptyText: <Empty description="暂无课程数据" style={{ padding: '32px 0' }} /> }}
+        <Card title="My Courses" bordered={false} bodyStyle={{ padding: 0 }}>
+          <Table
+            columns={columns}
+            dataSource={courses}
+            rowKey="id"
+            pagination={false}
+            locale={{ emptyText: <Empty description="No course data" style={{ padding: '32px 0' }} /> }}
           />
         </Card>
-
       </div>
     </div>
   );

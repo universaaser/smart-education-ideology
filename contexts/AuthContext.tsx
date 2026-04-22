@@ -13,6 +13,7 @@ export interface AuthContextType {
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
+const CAN_USE_MOCK_BOOTSTRAP = import.meta.env.DEV;
 
 // 开发环境下可以使用的 Mock 回退数据
 const MOCK_BOOTSTRAP = {
@@ -63,11 +64,19 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         setRoleUi(data.roleUi);
         setIsLoggedIn(true);
       } catch (error) {
-        console.warn('Bootstrap 获取失败，采用本地 Mock 数据 fallback:', error);
-        // BUGFIX: 如果后台接口没好，先提供 Mock 数据以便前端流程跑通
-        setCurrentUser(MOCK_BOOTSTRAP.user);
-        setRoleUi(MOCK_BOOTSTRAP.roleUi);
-        setIsLoggedIn(true);
+        if (CAN_USE_MOCK_BOOTSTRAP) {
+          console.warn('Bootstrap 获取失败，采用本地 Mock 数据 fallback:', error);
+          // 开发环境保留 mock 兜底，避免后端未就绪时阻断页面调试。
+          setCurrentUser(MOCK_BOOTSTRAP.user);
+          setRoleUi(MOCK_BOOTSTRAP.roleUi);
+          setIsLoggedIn(true);
+        } else {
+          console.warn('Bootstrap 获取失败，已清理当前鉴权状态:', error);
+          removeToken();
+          setCurrentUser(null);
+          setRoleUi(null);
+          setIsLoggedIn(false);
+        }
       } finally {
         setIsLoading(false);
       }

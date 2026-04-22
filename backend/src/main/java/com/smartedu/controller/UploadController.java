@@ -63,8 +63,13 @@ public class UploadController {
     @PostMapping("/file")
     public Result<Map<String, Object>> uploadFile(
             @RequestParam("file") MultipartFile file,
-            @RequestParam(defaultValue = "1") Long userId,
+            @RequestParam(required = false) Long userId,
             @RequestParam(required = false) Long courseId) {
+
+        // Upload records must stay attributable to the real operator; avoid a hidden fallback user.
+        if (userId == null) {
+            return Result.badRequest("User id cannot be empty");
+        }
 
         // 1. 校验文件
         if (file.isEmpty()) {

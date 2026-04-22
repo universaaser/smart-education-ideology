@@ -22,7 +22,19 @@ export interface NavItem {
   isBeta?: boolean;
 }
 
-/** 当前登录用户信息 */
+export interface ResourceUploadTarget {
+  taskId: number;
+  materialId?: number;
+}
+
+export interface ViewChangeOptions {
+  highlightNodeIds?: number[];
+  resourceUploadTarget?: ResourceUploadTarget;
+}
+
+export type ViewChangeHandler = (view: View, options?: ViewChangeOptions) => void;
+
+/** Current logged-in user info. */
 export interface CurrentUser {
   id: number;
   username: string;

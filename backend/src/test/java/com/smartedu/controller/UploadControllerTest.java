@@ -20,6 +20,7 @@ import java.lang.reflect.Proxy;
 import java.util.ArrayList;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -105,6 +106,15 @@ class UploadControllerTest {
                 .andExpect(jsonPath("$.data").isArray());
     }
 
+    @Test
+    void shouldRejectUploadWithoutUserId() throws Exception {
+        mockMvc.perform(multipart("/api/upload/file")
+                        .file("file", "demo".getBytes()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(400))
+                .andExpect(jsonPath("$.message").value("User id cannot be empty"));
+    }
+
     private ParseTaskMapper buildMapperStub(ParseTask task) {
         return (ParseTaskMapper) Proxy.newProxyInstance(
                 ParseTaskMapper.class.getClassLoader(),
@@ -149,6 +159,11 @@ class UploadControllerTest {
         @Override
         public PipelineResultDto regenerateTask(Long taskId) {
             return pipelineResultDto;
+        }
+
+        @Override
+        public void processDocumentAsync(Long taskId) {
+            // no-op for controller tests
         }
     }
 }

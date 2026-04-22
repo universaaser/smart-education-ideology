@@ -1,22 +1,27 @@
 package com.smartedu.controller;
 
 import com.smartedu.common.Result;
+import com.smartedu.dto.CourseCreateRequestDto;
+import com.smartedu.dto.CourseTeachingMaterialGroupDto;
 import com.smartedu.dto.KnowledgeNodeView;
 import com.smartedu.entity.Course;
 import com.smartedu.service.CourseService;
+import com.smartedu.service.TeachingMaterialService;
 import lombok.RequiredArgsConstructor;
-import org.springframework.web.bind.annotation.*;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
-import java.util.Map;
 
 /**
- * 课程控制器
- * 
+ * Course controller.
+ *
  * <p>
- * 处理课程 CRUD 和课程关联知识点查询
- * 
- * @author SmartEducation Team
+ * Handles course CRUD plus linked knowledge/material queries.
  */
 @RestController
 @RequestMapping("/api/courses")
@@ -24,12 +29,10 @@ import java.util.Map;
 public class CourseController {
 
     private final CourseService courseService;
+    private final TeachingMaterialService teachingMaterialService;
 
     /**
-     * 获取课程关联的知识点列表
-     * 
-     * @param id 课程ID
-     * @return 知识点列表（包含技术定义和思政价值）
+     * Query linked knowledge points for one course.
      */
     @GetMapping("/{id}/knowledge-points")
     public Result<List<KnowledgeNodeView>> getCourseKnowledgePoints(@PathVariable Long id) {
@@ -38,23 +41,36 @@ public class CourseController {
     }
 
     /**
-     * 创建新课程
+     * Query saved teaching materials grouped by upload task under one course.
+     */
+    @GetMapping("/{id}/materials")
+    public Result<List<CourseTeachingMaterialGroupDto>> getCourseTeachingMaterials(@PathVariable Long id) {
+        // Keep this read path direct so CourseService no longer depends on
+        // TeachingMaterialService and startup stays free of circular references.
+        List<CourseTeachingMaterialGroupDto> materials = teachingMaterialService.getCourseMaterialGroups(id);
+        return Result.success(materials);
+    }
+
+    /**
+     * Create a new course.
      */
     @PostMapping
-    public Result<Course> createCourse(@RequestBody Map<String, Object> request) {
-        String name = (String) request.get("name");
-        String code = (String) request.get("code");
-        String description = (String) request.get("description");
-        String semester = (String) request.get("semester");
-        Long teacherId = request.get("teacherId") != null
-                ? Long.valueOf(request.get("teacherId").toString())
-                : 1L;
-
-        if (name == null || name.isEmpty()) {
-            return Result.badRequest("课程名称不能为空");
+    public Result<Course> createCourse(@RequestBody CourseCreateRequestDto request) {
+        String courseName = request == null || request.getName() == null ? "" : request.getName().trim();
+        if (courseName.isEmpty()) {
+            return Result.badRequest("Course name cannot be empty");
+        }
+        // Keep course ownership explicit instead of silently attaching new courses to a demo teacher.
+        if (request == null || request.getTeacherId() == null) {
+            return Result.badRequest("Teacher id cannot be empty");
         }
 
-        Course course = courseService.createCourse(name, code, description, semester, teacherId);
-        return Result.success("课程创建成功", course);
+        Course course = courseService.createCourse(
+                courseName,
+                request.getCode(),
+                request.getDescription(),
+                request.getSemester(),
+                request.getTeacherId());
+        return Result.success("Course created", course);
     }
 }

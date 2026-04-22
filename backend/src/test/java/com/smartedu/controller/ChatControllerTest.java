@@ -9,12 +9,13 @@ import com.smartedu.dto.SelectionExplainHistoryDto;
 import com.smartedu.dto.SelectionExplainRequestDto;
 import com.smartedu.dto.SelectionExplainResponse;
 import com.smartedu.entity.ChatMessage;
+import com.smartedu.entity.ChatSession;
 import com.smartedu.mapper.ChatMessageMapper;
 import com.smartedu.mapper.ChatSessionMapper;
 import com.smartedu.mapper.SelectionExplainRecordMapper;
 import com.smartedu.service.AiIntelligenceService;
-import com.smartedu.service.KnowledgeRetrievalService;
 import com.smartedu.service.ChatService;
+import com.smartedu.service.KnowledgeRetrievalService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.web.servlet.MockMvc;
@@ -49,6 +50,16 @@ class ChatControllerTest {
     }
 
     @Test
+    void shouldRejectSelectionExplainWithoutUserId() throws Exception {
+        mockMvc.perform(post("/api/chat/explain-selection")
+                        .contentType("application/json")
+                        .content("{\"text\":\"sensor network\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(400))
+                .andExpect(jsonPath("$.message").value("User id cannot be empty"));
+    }
+
+    @Test
     void shouldExplainSelectionAndReturnEvidence() throws Exception {
         mockMvc.perform(post("/api/chat/explain-selection")
                         .contentType("application/json")
@@ -67,6 +78,27 @@ class ChatControllerTest {
                 .andExpect(jsonPath("$.code").value(200))
                 .andExpect(jsonPath("$.data.records[0].recordId").value(9))
                 .andExpect(jsonPath("$.data.total").value(1));
+    }
+
+    @Test
+    void shouldCreateSessionFromStructuredRequest() throws Exception {
+        mockMvc.perform(post("/api/chat/sessions")
+                        .contentType("application/json")
+                        .content("{\"userId\":7,\"title\":\"新对话\",\"aiModel\":\"openai\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200))
+                .andExpect(jsonPath("$.data.userId").value(7))
+                .andExpect(jsonPath("$.data.aiModel").value("openai"));
+    }
+
+    @Test
+    void shouldRejectSessionCreateWithoutUserId() throws Exception {
+        mockMvc.perform(post("/api/chat/sessions")
+                        .contentType("application/json")
+                        .content("{\"title\":\"新对话\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(400))
+                .andExpect(jsonPath("$.message").value("User id cannot be empty"));
     }
 
     @Test
@@ -161,6 +193,16 @@ class ChatControllerTest {
             item.setEvidenceItems(List.of());
             item.setCreatedAt(LocalDateTime.now());
             return new PageResult<>(List.of(item), 1L, 10L, 1L);
+        }
+
+        @Override
+        public ChatSession createSession(Long userId, String title, String aiModel) {
+            ChatSession session = new ChatSession();
+            session.setId(21L);
+            session.setUserId(userId);
+            session.setTitle(title);
+            session.setAiModel(aiModel);
+            return session;
         }
     }
 }

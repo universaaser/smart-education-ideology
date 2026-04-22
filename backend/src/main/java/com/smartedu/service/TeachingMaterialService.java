@@ -5,6 +5,7 @@ import com.smartedu.common.PageResult;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.smartedu.dto.CourseTeachingMaterialGroupDto;
 import com.smartedu.dto.IdeologyMatchDto;
 import com.smartedu.dto.KnowledgePointDto;
 import com.smartedu.dto.MaterialVersionItemDto;
@@ -30,8 +31,12 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 /**
@@ -55,6 +60,15 @@ public class TeachingMaterialService {
     private final AiIntelligenceService aiIntelligenceService;
     private final TeachingMaterialTraceMapper teachingMaterialTraceMapper;
     private final ObjectMapper objectMapper;
+
+    private static final Comparator<TeachingMaterial> COURSE_GROUP_VERSION_COMPARATOR =
+            Comparator.comparingInt((TeachingMaterial item) -> normalizeNumber(item.getIsLatest())).reversed()
+                    .thenComparing(Comparator.comparingInt(
+                            (TeachingMaterial item) -> normalizeNumber(item.getVersionNo())).reversed())
+                    .thenComparing(TeachingMaterial::getUpdatedAt,
+                            Comparator.nullsLast(Comparator.reverseOrder()))
+                    .thenComparing(TeachingMaterial::getId,
+                            Comparator.nullsLast(Comparator.reverseOrder()));
 
     /**
      * Build editable draft for UI.
@@ -204,6 +218,60 @@ public class TeachingMaterialService {
         return teachingMaterialMapper.selectList(wrapper).stream()
                 .map(this::toVersionItem)
                 .collect(Collectors.toList());
+    }
+
+    /**
+     * Query saved teaching materials grouped by parse task under one course.
+     */
+    public List<CourseTeachingMaterialGroupDto> getCourseMaterialGroups(Long courseId) {
+        LambdaQueryWrapper<TeachingMaterial> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(TeachingMaterial::getCourseId, courseId)
+                .isNotNull(TeachingMaterial::getParseTaskId);
+        List<TeachingMaterial> materials = teachingMaterialMapper.selectList(wrapper);
+        if (materials.isEmpty()) {
+            return new ArrayList<>();
+        }
+
+        Map<Long, List<TeachingMaterial>> groupedByTask = new LinkedHashMap<>();
+        for (TeachingMaterial material : materials) {
+            if (material.getParseTaskId() == null) {
+                continue;
+            }
+            groupedByTask.computeIfAbsent(material.getParseTaskId(), key -> new ArrayList<>()).add(material);
+        }
+        Map<Long, ParseTask> parseTaskMap = loadParseTaskMap(new ArrayList<>(groupedByTask.keySet()));
+
+        List<CourseTeachingMaterialGroupDto> result = new ArrayList<>();
+        for (Map.Entry<Long, List<TeachingMaterial>> entry : groupedByTask.entrySet()) {
+            List<TeachingMaterial> versions = new ArrayList<>(entry.getValue());
+            versions.sort(COURSE_GROUP_VERSION_COMPARATOR);
+            if (versions.isEmpty()) {
+                continue;
+            }
+
+            TeachingMaterial latest = versions.get(0);
+            ParseTask parseTask = parseTaskMap.get(entry.getKey());
+            String sourceFileName = parseTask == null ? "" : safe(parseTask.getFileName());
+            String displayTitle = firstNonBlank(safe(latest.getTitle()), sourceFileName);
+
+            CourseTeachingMaterialGroupDto group = new CourseTeachingMaterialGroupDto();
+            group.setParseTaskId(entry.getKey());
+            group.setCourseId(courseId);
+            group.setDisplayTitle(displayTitle);
+            group.setSourceFileName(sourceFileName);
+            group.setLatestMaterialId(latest.getId());
+            group.setLatestVersionNo(latest.getVersionNo());
+            group.setLatestStatus(safe(latest.getStatus()));
+            group.setUpdatedAt(latest.getUpdatedAt());
+            group.setVersions(versions.stream()
+                    .map(this::toVersionItem)
+                    .collect(Collectors.toList()));
+            result.add(group);
+        }
+
+        result.sort(Comparator.comparing(CourseTeachingMaterialGroupDto::getUpdatedAt,
+                Comparator.nullsLast(Comparator.reverseOrder())));
+        return result;
     }
 
     /**
@@ -416,41 +484,100 @@ public class TeachingMaterialService {
             return traceItems;
         }
 
+        Map<String, Long> knowledgePointIdMap = loadSubjectKnowledgeIdMap(pipeline.getIdeologyMatches());
+        Map<String, String> evidenceSnippetMap = loadEvidenceSnippetMap(pipeline.getKnowledgePoints());
         for (IdeologyMatchDto match : pipeline.getIdeologyMatches()) {
+            if (match == null) {
+                continue;
+            }
+            String knowledgePointName = safe(match.getKnowledgePointName());
             TeachingTraceItemDto traceItem = new TeachingTraceItemDto();
             traceItem.setParseTaskId(taskId);
-            traceItem.setKnowledgePointName(safe(match.getKnowledgePointName()));
-            traceItem.setKnowledgePointId(findSubjectKnowledgeIdByName(match.getKnowledgePointName()));
+            traceItem.setKnowledgePointName(knowledgePointName);
+            traceItem.setKnowledgePointId(knowledgePointIdMap.get(knowledgePointName));
             traceItem.setIdeologyElement(safe(match.getIdeologyElement()));
             traceItem.setMatchReason(safe(match.getMatchReason()));
-            traceItem.setEvidenceSnippet(findEvidenceSnippet(pipeline.getKnowledgePoints(), match.getKnowledgePointName()));
+            traceItem.setEvidenceSnippet(firstNonBlank(evidenceSnippetMap.get(knowledgePointName), ""));
             traceItems.add(traceItem);
         }
         return traceItems;
     }
 
-    private Long findSubjectKnowledgeIdByName(String pointName) {
-        String normalized = safe(pointName);
-        if (normalized.isBlank()) {
-            return null;
+    private Map<Long, ParseTask> loadParseTaskMap(List<Long> taskIds) {
+        Map<Long, ParseTask> parseTaskMap = new HashMap<>();
+        if (taskIds == null || taskIds.isEmpty()) {
+            return parseTaskMap;
         }
-        LambdaQueryWrapper<SubjectKnowledge> wrapper = new LambdaQueryWrapper<>();
-        wrapper.eq(SubjectKnowledge::getName, normalized).last("LIMIT 1");
-        SubjectKnowledge subjectKnowledge = subjectKnowledgeMapper.selectOne(wrapper);
-        return subjectKnowledge == null ? null : subjectKnowledge.getId();
+
+        List<ParseTask> parseTasks = parseTaskMapper.selectBatchIds(taskIds);
+        if (parseTasks == null || parseTasks.isEmpty()) {
+            return parseTaskMap;
+        }
+
+        for (ParseTask parseTask : parseTasks) {
+            if (parseTask == null || parseTask.getId() == null) {
+                continue;
+            }
+            parseTaskMap.put(parseTask.getId(), parseTask);
+        }
+        return parseTaskMap;
     }
 
-    private String findEvidenceSnippet(List<KnowledgePointDto> points, String pointName) {
-        if (points == null || points.isEmpty()) {
-            return "";
+    /**
+     * 这里按批量加载知识点 ID，避免每个 match 单独查一次数据库。
+     */
+    private Map<String, Long> loadSubjectKnowledgeIdMap(List<IdeologyMatchDto> matches) {
+        Map<String, Long> idMap = new HashMap<>();
+        if (matches == null || matches.isEmpty()) {
+            return idMap;
         }
-        String normalized = safe(pointName);
-        for (KnowledgePointDto point : points) {
-            if (safe(point.getPointName()).equalsIgnoreCase(normalized)) {
-                return trimToLength(safe(point.getEvidenceSnippet()), 500);
+
+        List<String> knowledgePointNames = matches.stream()
+                .filter(match -> match != null)
+                .map(match -> safe(match.getKnowledgePointName()))
+                .filter(name -> !name.isBlank())
+                .distinct()
+                .toList();
+        if (knowledgePointNames.isEmpty()) {
+            return idMap;
+        }
+
+        LambdaQueryWrapper<SubjectKnowledge> wrapper = new LambdaQueryWrapper<>();
+        wrapper.in(SubjectKnowledge::getName, knowledgePointNames)
+                .orderByAsc(SubjectKnowledge::getId);
+        List<SubjectKnowledge> subjectKnowledgeList = subjectKnowledgeMapper.selectList(wrapper);
+        if (subjectKnowledgeList == null || subjectKnowledgeList.isEmpty()) {
+            return idMap;
+        }
+
+        for (SubjectKnowledge subjectKnowledge : subjectKnowledgeList) {
+            if (subjectKnowledge == null || subjectKnowledge.getId() == null) {
+                continue;
+            }
+            String normalizedName = safe(subjectKnowledge.getName());
+            if (!normalizedName.isBlank()) {
+                idMap.putIfAbsent(normalizedName, subjectKnowledge.getId());
             }
         }
-        return "";
+        return idMap;
+    }
+
+    private Map<String, String> loadEvidenceSnippetMap(List<KnowledgePointDto> points) {
+        Map<String, String> evidenceMap = new HashMap<>();
+        if (points == null || points.isEmpty()) {
+            return evidenceMap;
+        }
+
+        for (KnowledgePointDto point : points) {
+            if (point == null) {
+                continue;
+            }
+            String normalizedName = safe(point.getPointName());
+            if (!normalizedName.isBlank()) {
+                evidenceMap.putIfAbsent(normalizedName, trimToLength(safe(point.getEvidenceSnippet()), 500));
+            }
+        }
+        return evidenceMap;
     }
 
     private TeachingMaterialDraftDto toDraftDto(TeachingMaterial material) {
@@ -768,5 +895,9 @@ public class TeachingMaterialService {
 
     private String safe(String value) {
         return value == null ? "" : value.trim();
+    }
+
+    private static int normalizeNumber(Integer value) {
+        return value == null ? 0 : value;
     }
 }

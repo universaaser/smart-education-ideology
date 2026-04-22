@@ -2,19 +2,21 @@ package com.smartedu.controller;
 
 import com.smartedu.common.Result;
 import com.smartedu.dto.AuthBootstrapResponse;
+import com.smartedu.dto.AuthLoginRequestDto;
+import com.smartedu.dto.AuthRegisterRequestDto;
 import com.smartedu.service.AuthService;
 import lombok.RequiredArgsConstructor;
-import org.springframework.web.bind.annotation.*;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RestController;
 
 import java.util.Map;
 
 /**
- * 认证控制器
- * 
- * <p>
- * 处理用户登录、注册等认证相关接口
- * 
- * @author SmartEducation Team
+ * Authentication controller.
  */
 @RestController
 @RequestMapping("/api/auth")
@@ -24,73 +26,62 @@ public class AuthController {
     private final AuthService authService;
 
     /**
-     * 用户登录
-     * 
-     * @param request 包含 username 和 password 的请求体
-     * @return 包含 token 和用户信息的响应
+     * Handle login with a structured request payload.
      */
     @PostMapping("/login")
-    public Result<Map<String, Object>> login(@RequestBody Map<String, String> request) {
-        String username = request.get("username");
-        String password = request.get("password");
+    public Result<Map<String, Object>> login(@RequestBody AuthLoginRequestDto request) {
+        String username = request == null ? null : request.getUsername();
+        String password = request == null ? null : request.getPassword();
 
-        // 参数校验
-        if (username == null || username.isEmpty()) {
-            return Result.badRequest("用户名不能为空");
+        if (username == null || username.trim().isEmpty()) {
+            return Result.badRequest("Username cannot be empty");
         }
         if (password == null || password.isEmpty()) {
-            return Result.badRequest("密码不能为空");
+            return Result.badRequest("Password cannot be empty");
         }
 
         try {
-            Map<String, Object> result = authService.login(username, password);
-            return Result.success("登录成功", result);
+            Map<String, Object> result = authService.login(username.trim(), password);
+            return Result.success("Login successful", result);
         } catch (RuntimeException e) {
             return Result.error(401, e.getMessage());
         }
     }
 
     /**
-     * 用户注册
-     * 
-     * @param request 包含 username、password、email、role 的请求体
-     * @return 包含 token 和用户信息的响应
+     * Handle register with a structured request payload.
      */
     @PostMapping("/register")
-    public Result<Map<String, Object>> register(@RequestBody Map<String, String> request) {
-        String username = request.get("username");
-        String password = request.get("password");
-        String email = request.get("email");
-        String role = request.get("role");
+    public Result<Map<String, Object>> register(@RequestBody AuthRegisterRequestDto request) {
+        String username = request == null ? null : request.getUsername();
+        String password = request == null ? null : request.getPassword();
+        String email = request == null ? null : request.getEmail();
+        String role = request == null ? null : request.getRole();
 
-        // 参数校验
-        if (username == null || username.isEmpty()) {
-            return Result.badRequest("用户名不能为空");
+        if (username == null || username.trim().isEmpty()) {
+            return Result.badRequest("Username cannot be empty");
         }
         if (password == null || password.length() < 6) {
-            return Result.badRequest("密码长度至少6位");
+            return Result.badRequest("Password must be at least 6 characters");
         }
 
         try {
-            Map<String, Object> result = authService.register(username, password, email, role);
-            return Result.success("注册成功", result);
+            Map<String, Object> result = authService.register(username.trim(), password, email, role);
+            return Result.success("Register successful", result);
         } catch (RuntimeException e) {
             return Result.error(e.getMessage());
         }
     }
 
     /**
-     * 获取当前用户信息
-     * 
-     * @param authorization Authorization 请求头
-     * @return 用户信息
+     * Get current user info.
      */
     @GetMapping("/me")
     public Result<Map<String, Object>> getCurrentUser(
             @RequestHeader(value = "Authorization", required = false) String authorization) {
 
         if (authorization == null || !authorization.startsWith("Bearer ")) {
-            return Result.unauthorized("未提供有效的令牌");
+            return Result.unauthorized("Invalid authorization header");
         }
 
         String token = authorization.substring(7);
@@ -103,14 +94,14 @@ public class AuthController {
     }
 
     /**
-     * Provide user info together with role-based UI contract for future frontend split.
+     * Provide bootstrap data for the frontend shell.
      */
     @GetMapping("/bootstrap")
     public Result<AuthBootstrapResponse> getBootstrap(
             @RequestHeader(value = "Authorization", required = false) String authorization) {
 
         if (authorization == null || !authorization.startsWith("Bearer ")) {
-            return Result.unauthorized("未提供有效的令牌");
+            return Result.unauthorized("Invalid authorization header");
         }
 
         String token = authorization.substring(7);

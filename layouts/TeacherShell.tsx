@@ -1,37 +1,31 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { Layout, Spin } from 'antd';
-import { View } from '../types';
+import React, { Suspense, lazy, useState, useEffect, useCallback } from 'react';
+import { Layout } from 'antd';
+import { ResourceUploadTarget, View, ViewChangeHandler } from '../types';
 import { AppSidebar } from '../components/Sidebar';
 import { AppHeader } from '../components/Header';
-import { Dashboard } from '../views/Dashboard';
-import { KnowledgeGraph } from '../views/KnowledgeGraph';
-import { AIAssistant } from '../views/AIAssistant';
-import { ResourceUpload } from '../views/ResourceUpload';
-import { ResourceLibrary } from '../views/ResourceLibrary';
 import { useAuth } from '../contexts/AuthContext';
 import { resourceApi, CrawlTaskStatusInfo } from '../services/api';
 
 const { Sider, Content } = Layout;
+const Dashboard = lazy(() => import('../views/Dashboard').then((module) => ({ default: module.Dashboard })));
+const KnowledgeGraph = lazy(() => import('../views/KnowledgeGraph').then((module) => ({ default: module.KnowledgeGraph })));
+const AIAssistant = lazy(() => import('../views/AIAssistant').then((module) => ({ default: module.AIAssistant })));
+const ResourceUpload = lazy(() => import('../views/ResourceUpload').then((module) => ({ default: module.ResourceUpload })));
+const ResourceLibrary = lazy(() => import('../views/ResourceLibrary').then((module) => ({ default: module.ResourceLibrary })));
 
-/**
- * 教师端布局 Shell
- *
- * NOTE: 使用 Ant Design Layout 替换手写 flex 布局。
- * 知识图谱爬虫状态轮询保留在此层，便于跨视图共享状态。
- */
 export const TeacherShell: React.FC = () => {
   const { currentUser, roleUi, logout, updateAvatar } = useAuth();
   const [currentView, setCurrentView] = useState<View>(roleUi?.defaultView || View.DASHBOARD);
   const [crawlStatus, setCrawlStatus] = useState<CrawlTaskStatusInfo | null>(null);
   const [collapsed, setCollapsed] = useState(false);
+  const [resourceUploadTarget, setResourceUploadTarget] = useState<ResourceUploadTarget | null>(null);
 
-  /** 教师特有：知识图谱爬虫状态轮询 */
   const fetchCrawlStatus = useCallback(async () => {
     try {
       const status = await resourceApi.getCrawlStatus();
       setCrawlStatus(status);
     } catch {
-      // 忽略轮询错误，不影响页面正常使用
+      // Keep the shell usable even if polling fails.
     }
   }, []);
 
@@ -41,40 +35,55 @@ export const TeacherShell: React.FC = () => {
     return () => window.clearInterval(timer);
   }, [fetchCrawlStatus]);
 
-  /** 视图守卫：切换到不被允许的视图时回退到默认 */
   useEffect(() => {
     if (roleUi && !roleUi.allowedViews.includes(currentView)) {
       setCurrentView(roleUi.defaultView);
+      if (roleUi.defaultView !== View.RESOURCE_UPLOAD) {
+        setResourceUploadTarget(null);
+      }
     }
   }, [currentView, roleUi]);
+
+  const handleChangeView: ViewChangeHandler = (view, options) => {
+    setCurrentView(view);
+    if (view === View.RESOURCE_UPLOAD) {
+      setResourceUploadTarget(options?.resourceUploadTarget ?? null);
+    }
+  };
 
   const renderView = () => {
     switch (currentView) {
       case View.DASHBOARD:
-        return <Dashboard onChangeView={setCurrentView} />;
+        return <Dashboard onChangeView={view => handleChangeView(view)} />;
       case View.KNOWLEDGE_GRAPH:
         return <KnowledgeGraph crawlStatus={crawlStatus} refreshCrawlStatus={fetchCrawlStatus} />;
       case View.AI_ASSISTANT:
         return <AIAssistant />;
       case View.RESOURCE_UPLOAD:
-        return <ResourceUpload userId={currentUser?.id} />;
+        return <ResourceUpload userId={currentUser?.id} resourceUploadTarget={resourceUploadTarget || undefined} />;
       case View.COURSE_LIBRARY:
-        return <ResourceLibrary />;
+        return <ResourceLibrary onChangeView={handleChangeView} />;
       default:
-        return <Dashboard onChangeView={setCurrentView} />;
+        return <Dashboard onChangeView={view => handleChangeView(view)} />;
     }
   };
 
   const getHeaderTitle = () => {
     switch (currentView) {
-      case View.DASHBOARD: return '教师控制台';
-      case View.KNOWLEDGE_GRAPH: return '知识图谱交互分析';
-      case View.AI_ASSISTANT: return 'AI 课程思政教学助手';
-      case View.RESOURCE_UPLOAD: return '资源管理';
-      case View.COURSE_LIBRARY: return '课程资源库';
-      default: return '智教思政';
+      case View.DASHBOARD: return 'Teacher Dashboard';
+      case View.KNOWLEDGE_GRAPH: return 'Knowledge Graph';
+      case View.AI_ASSISTANT: return 'AI Teaching Assistant';
+      case View.RESOURCE_UPLOAD: return 'Resource Upload';
+      case View.COURSE_LIBRARY: return 'Course Library';
+      default: return 'Smart Ideology Education';
     }
   };
+
+  const renderContentFallback = () => (
+    <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      Loading...
+    </div>
+  );
 
   return (
     <Layout style={{ height: '100vh', overflow: 'hidden' }}>
@@ -94,7 +103,7 @@ export const TeacherShell: React.FC = () => {
       >
         <AppSidebar
           currentView={currentView}
-          onChangeView={setCurrentView}
+          onChangeView={handleChangeView}
           onLogout={logout}
           user={currentUser}
           onAvatarChange={updateAvatar}
@@ -104,7 +113,9 @@ export const TeacherShell: React.FC = () => {
       <Layout style={{ background: 'var(--bg-light)', overflow: 'hidden' }}>
         <AppHeader title={getHeaderTitle()} user={currentUser} />
         <Content style={{ overflow: 'hidden', position: 'relative', flex: 1, display: 'flex', flexDirection: 'column' }}>
-          {renderView()}
+          <Suspense fallback={renderContentFallback()}>
+            {renderView()}
+          </Suspense>
         </Content>
       </Layout>
     </Layout>

@@ -103,6 +103,18 @@ public class ResourceService {
     }
 
     /**
+     * Detect obvious duplicates that reuse the same cleaned article title across sites.
+     */
+    public boolean existsByTitle(String title) {
+        if (title == null || title.isBlank()) {
+            return false;
+        }
+        LambdaQueryWrapper<Resource> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(Resource::getTitle, title).last("LIMIT 1");
+        return resourceMapper.selectCount(wrapper) > 0;
+    }
+
+    /**
      * 供 AI 对话检索上下文资源
      */
     public List<Resource> searchForChatContext(String keyword, int limit) {

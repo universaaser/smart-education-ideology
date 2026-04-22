@@ -2,7 +2,9 @@ package com.smartedu.controller;
 
 import com.smartedu.common.Result;
 import com.smartedu.common.PageResult;
+import com.smartedu.dto.ChatMessageRequestDto;
 import com.smartedu.dto.ChatResponseDto;
+import com.smartedu.dto.ChatSessionCreateRequestDto;
 import com.smartedu.dto.SelectionExplainHistoryDto;
 import com.smartedu.dto.SelectionExplainRequestDto;
 import com.smartedu.dto.SelectionExplainResponse;
@@ -37,7 +39,7 @@ public class ChatController {
      * 获取用户会话列表。
      */
     @GetMapping("/sessions")
-    public Result<List<ChatSession>> getSessions(@RequestParam(defaultValue = "1") Long userId) {
+    public Result<List<ChatSession>> getSessions(@RequestParam Long userId) {
         List<ChatSession> sessions = chatService.getUserSessions(userId);
         return Result.success(sessions);
     }
@@ -46,12 +48,14 @@ public class ChatController {
      * 创建新会话。
      */
     @PostMapping("/sessions")
-    public Result<ChatSession> createSession(@RequestBody Map<String, Object> request) {
-        Long userId = Long.valueOf(request.getOrDefault("userId", 1).toString());
-        String title = (String) request.get("title");
-        String aiModel = (String) request.getOrDefault("aiModel", "default");
+    public Result<ChatSession> createSession(@RequestBody ChatSessionCreateRequestDto request) {
+        if (request == null || request.getUserId() == null) {
+            return Result.badRequest("User id cannot be empty");
+        }
+        String title = request.getTitle();
+        String aiModel = request.getAiModel();
 
-        ChatSession session = chatService.createSession(userId, title, aiModel);
+        ChatSession session = chatService.createSession(request.getUserId(), title, aiModel);
         return Result.success("Session created", session);
     }
 
@@ -73,8 +77,10 @@ public class ChatController {
     @PostMapping("/sessions/{sessionId}/message")
     public Result<ChatResponseDto> sendMessage(
             @PathVariable Long sessionId,
-            @RequestBody Map<String, String> request) {
-        String message = request.get("message");
+            @RequestBody ChatMessageRequestDto request) {
+        // Align this endpoint with the neighboring DTO-based contracts so future fields can
+        // evolve without reintroducing ad-hoc map parsing.
+        String message = request == null ? null : request.getMessage();
         if (message == null || message.trim().isEmpty()) {
             return Result.badRequest("Message cannot be empty");
         }
@@ -95,6 +101,9 @@ public class ChatController {
         String text = request.getText();
         if (text == null || text.trim().isEmpty()) {
             return Result.badRequest("Text cannot be empty");
+        }
+        if (request.getUserId() == null) {
+            return Result.badRequest("User id cannot be empty");
         }
 
         try {
