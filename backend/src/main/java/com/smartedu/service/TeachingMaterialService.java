@@ -4,22 +4,26 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.smartedu.common.PageResult;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.smartedu.dto.CourseTeachingMaterialGroupDto;
 import com.smartedu.dto.IdeologyMatchDto;
 import com.smartedu.dto.KnowledgePointDto;
 import com.smartedu.dto.MaterialVersionItemDto;
 import com.smartedu.dto.PipelineResultDto;
+import com.smartedu.dto.ResourceCitationDto;
 import com.smartedu.dto.TeachingArtifactsDto;
 import com.smartedu.dto.TeachingMaterialDraftDto;
 import com.smartedu.dto.TeachingMaterialSaveRequestDto;
 import com.smartedu.dto.TeachingMaterialViewDto;
 import com.smartedu.dto.TeachingMaterialTraceDto;
 import com.smartedu.dto.TeachingTraceItemDto;
+import com.smartedu.entity.CourseMaterialRule;
 import com.smartedu.entity.ParseTask;
 import com.smartedu.entity.SubjectKnowledge;
 import com.smartedu.entity.TeachingMaterial;
 import com.smartedu.entity.TeachingMaterialTrace;
+import com.smartedu.mapper.CourseMaterialRuleMapper;
 import com.smartedu.mapper.ParseTaskMapper;
 import com.smartedu.mapper.SubjectKnowledgeMapper;
 import com.smartedu.mapper.TeachingMaterialMapper;
@@ -53,11 +57,17 @@ public class TeachingMaterialService {
 
     private static final String STATUS_DRAFT = "DRAFT";
     private static final String STATUS_PUBLISHED = "PUBLISHED";
+    private static final String RULE_MIN_LECTURE_CHARACTERS = "minLectureCharacters";
+    private static final String RULE_REQUIRED_SECTIONS = "requiredSections";
+    private static final String RULE_REQUIRE_IDEOLOGY_TAG_IN_CASES = "requireIdeologyTagInCases";
+    private static final int DEFAULT_MIN_LECTURE_CHARACTERS = 0;
 
     private final TeachingMaterialMapper teachingMaterialMapper;
+    private final CourseMaterialRuleMapper courseMaterialRuleMapper;
     private final ParseTaskMapper parseTaskMapper;
     private final SubjectKnowledgeMapper subjectKnowledgeMapper;
     private final AiIntelligenceService aiIntelligenceService;
+    private final ParseTaskCorrectionService parseTaskCorrectionService;
     private final TeachingMaterialTraceMapper teachingMaterialTraceMapper;
     private final ObjectMapper objectMapper;
 
@@ -84,7 +94,7 @@ public class TeachingMaterialService {
             return toDraftDto(latest);
         }
 
-        PipelineResultDto pipeline = aiIntelligenceService.getPipelineResult(taskId);
+        PipelineResultDto pipeline = resolveEffectivePipeline(task);
         return buildDraftFromPipeline(task, pipeline);
     }
 
@@ -94,7 +104,7 @@ public class TeachingMaterialService {
     @Transactional
     public TeachingMaterialDraftDto saveDraft(Long taskId, TeachingMaterialSaveRequestDto request) {
         ParseTask task = requireParseTask(taskId);
-        PipelineResultDto pipeline = aiIntelligenceService.getPipelineResult(taskId);
+        PipelineResultDto pipeline = resolveEffectivePipeline(task);
         List<TeachingTraceItemDto> traceItems = buildTraceItems(taskId, pipeline);
         TeachingMaterial latest = findLatestByTaskId(taskId);
 
@@ -164,7 +174,9 @@ public class TeachingMaterialService {
     @Transactional
     public TeachingMaterialViewDto savePublishedVersion(Long taskId, TeachingMaterialSaveRequestDto request) {
         ParseTask task = requireParseTask(taskId);
-        PipelineResultDto pipeline = aiIntelligenceService.getPipelineResult(taskId);
+        requireCompletePublishedQuestions(request.getQuestions());
+        requireCourseMaterialRules(task.getCourseId(), request);
+        PipelineResultDto pipeline = resolveEffectivePipeline(task);
         List<TeachingTraceItemDto> traceItems = buildTraceItems(taskId, pipeline);
         TeachingMaterial latest = findLatestByTaskId(taskId);
 
@@ -432,6 +444,11 @@ public class TeachingMaterialService {
         return task;
     }
 
+    private PipelineResultDto resolveEffectivePipeline(ParseTask task) {
+        PipelineResultDto fallback = aiIntelligenceService.getPipelineResult(task.getId());
+        return parseTaskCorrectionService.resolveEffectivePipelineResult(task, fallback);
+    }
+
     private TeachingMaterial findLatestByTaskId(Long taskId) {
         LambdaQueryWrapper<TeachingMaterial> wrapper = new LambdaQueryWrapper<>();
         wrapper.eq(TeachingMaterial::getParseTaskId, taskId)
@@ -498,9 +515,29 @@ public class TeachingMaterialService {
             traceItem.setIdeologyElement(safe(match.getIdeologyElement()));
             traceItem.setMatchReason(safe(match.getMatchReason()));
             traceItem.setEvidenceSnippet(firstNonBlank(evidenceSnippetMap.get(knowledgePointName), ""));
+            traceItem.setCitationExplanation(safe(match.getCitationExplanation()));
+            ResourceCitationDto citation = firstCitation(match.getResourceCitations());
+            if (citation != null) {
+                traceItem.setResourceTitle(safe(citation.getTitle()));
+                traceItem.setResourceSource(safe(citation.getSource()));
+                traceItem.setResourceSourceUrl(safe(citation.getSourceUrl()));
+                traceItem.setResourceQuotedExcerpt(safe(citation.getQuotedExcerpt()));
+            }
             traceItems.add(traceItem);
         }
         return traceItems;
+    }
+
+    private ResourceCitationDto firstCitation(List<ResourceCitationDto> citations) {
+        if (citations == null || citations.isEmpty()) {
+            return null;
+        }
+        for (ResourceCitationDto citation : citations) {
+            if (citation != null) {
+                return citation;
+            }
+        }
+        return null;
     }
 
     private Map<Long, ParseTask> loadParseTaskMap(List<Long> taskIds) {
@@ -629,41 +666,67 @@ public class TeachingMaterialService {
     }
 
     private String buildMarkdown(TeachingMaterialViewDto material) {
+        // Note: lecture notes, cases, reference answers and Selection Explanation
+        // content may already be authored as Markdown (AI answers usually contain
+        // #/*/- markers, and teachers may directly type Markdown). The previous
+        // implementation escaped every markdown character, which destroyed the
+        // formatting of exported .md files. We now treat these fields as
+        // "content is markdown" and only normalize characters that would really
+        // break the surrounding structure (e.g. line breaks inside headings).
         StringBuilder markdown = new StringBuilder();
-        markdown.append("# ").append(escapeMarkdownInline(firstNonBlank(material.getTitle(), "Teaching Material"))).append("\n\n");
+        markdown.append("# ").append(sanitizeHeading(firstNonBlank(material.getTitle(), "Teaching Material"))).append("\n\n");
         markdown.append("- Version: ").append(material.getVersionNo() == null ? 1 : material.getVersionNo()).append("\n");
-        markdown.append("- Status: ").append(escapeMarkdownInline(firstNonBlank(material.getStatus(), STATUS_DRAFT))).append("\n");
+        markdown.append("- Status: ").append(sanitizeInline(firstNonBlank(material.getStatus(), STATUS_DRAFT))).append("\n");
         markdown.append("- Updated At: ").append(material.getUpdatedAt() == null ? "" : material.getUpdatedAt()).append("\n\n");
 
         markdown.append("## Lecture Notes\n\n");
         String notes = safe(material.getLectureNotes());
-        markdown.append(notes.isBlank() ? "_No lecture notes._" : escapeMarkdownBlock(notes)).append("\n\n");
+        markdown.append(notes.isBlank() ? "_No lecture notes._" : notes).append("\n\n");
 
-        markdown.append("## Cases\n\n");
+        markdown.append("## Teaching Cases\n\n");
         if (material.getCases() == null || material.getCases().isEmpty()) {
             markdown.append("_No cases._\n\n");
         } else {
+            int index = 1;
             for (String caseItem : material.getCases()) {
-                markdown.append("- ").append(escapeMarkdownInline(caseItem)).append("\n");
+                markdown.append("### Case ").append(index).append("\n\n");
+                String caseContent = safe(caseItem);
+                markdown.append(caseContent.isBlank() ? "_No case content._" : caseContent).append("\n\n");
+                index++;
             }
-            markdown.append("\n");
         }
 
-        markdown.append("## Questions\n\n");
+        markdown.append("## Assessment Questions\n\n");
         if (material.getQuestions() == null || material.getQuestions().isEmpty()) {
             markdown.append("_No questions._\n\n");
         } else {
             int index = 1;
             for (TeachingArtifactsDto.QuestionDto question : material.getQuestions()) {
-                markdown.append("### ").append(index).append(". ").append(escapeMarkdownInline(question.getStem())).append("\n\n");
+                markdown.append("### Question ").append(index).append("\n\n");
+                markdown.append("**Type**: ").append(sanitizeInline(firstNonBlank(question.getQuestionType(), "SHORT_ANSWER"))).append("\n\n");
+                markdown.append("**Difficulty**: ").append(sanitizeInline(firstNonBlank(question.getDifficulty(), "MEDIUM"))).append("\n\n");
+                if (question.getKnowledgePointId() != null) {
+                    markdown.append("**Knowledge Point ID**: ").append(question.getKnowledgePointId()).append("\n\n");
+                }
+                markdown.append("**Stem**\n\n");
+                String stem = safe(question.getStem());
+                markdown.append(stem.isBlank() ? "_No question stem._" : stem).append("\n\n");
+                if (question.getOptions() != null && !question.getOptions().isEmpty()) {
+                    markdown.append("**Options**\n\n");
+                    for (String option : question.getOptions()) {
+                        markdown.append(formatListItem(option)).append("\n");
+                    }
+                    markdown.append("\n");
+                }
                 markdown.append("**Reference Answer**\n\n");
-                markdown.append(escapeMarkdownBlock(question.getReferenceAnswer())).append("\n\n");
+                String referenceAnswer = safe(question.getReferenceAnswer());
+                markdown.append(referenceAnswer.isBlank() ? "_No reference answer._" : referenceAnswer).append("\n\n");
                 markdown.append("**Scoring Points**\n\n");
                 if (question.getScoringPoints() == null || question.getScoringPoints().isEmpty()) {
                     markdown.append("- _None._\n\n");
                 } else {
                     for (String point : question.getScoringPoints()) {
-                        markdown.append("- ").append(escapeMarkdownInline(point)).append("\n");
+                        markdown.append(formatListItem(point)).append("\n");
                     }
                     markdown.append("\n");
                 }
@@ -671,54 +734,80 @@ public class TeachingMaterialService {
             }
         }
 
-        markdown.append("## Trace Summary\n\n");
+        markdown.append("## Ideology Integration\n\n");
         if (material.getTraceItems() == null || material.getTraceItems().isEmpty()) {
-            markdown.append("_No trace items._\n");
+            markdown.append("_No ideology integration records._\n");
         } else {
             int index = 1;
             for (var trace : material.getTraceItems()) {
-                markdown.append(index).append(". **Knowledge Point**: ")
-                        .append(escapeMarkdownInline(trace.getKnowledgePointName())).append("\n");
-                markdown.append("   - Ideology Element: ").append(escapeMarkdownInline(trace.getIdeologyElement())).append("\n");
-                markdown.append("   - Evidence: ").append(escapeMarkdownInline(trace.getEvidenceSnippet())).append("\n");
-                markdown.append("   - Reason: ").append(escapeMarkdownInline(trace.getMatchReason())).append("\n");
+                markdown.append("### Integration ").append(index).append("\n\n");
+                markdown.append("- **Knowledge Point**: ")
+                        .append(sanitizeInline(trace.getKnowledgePointName())).append("\n");
+                markdown.append("- **Ideology Element**: ").append(sanitizeInline(trace.getIdeologyElement())).append("\n");
+                markdown.append("- **Evidence**: ").append(sanitizeInline(trace.getEvidenceSnippet())).append("\n");
+                markdown.append("- **Integration Reason**: ").append(sanitizeInline(trace.getMatchReason())).append("\n");
+                if (!safe(trace.getResourceTitle()).isBlank()) {
+                    markdown.append("- **Resource Title**: ").append(sanitizeInline(trace.getResourceTitle())).append("\n");
+                }
+                if (!safe(trace.getResourceSource()).isBlank()) {
+                    markdown.append("- **Resource Source**: ").append(sanitizeInline(trace.getResourceSource())).append("\n");
+                }
+                if (!safe(trace.getResourceSourceUrl()).isBlank()) {
+                    markdown.append("- **Resource URL**: ").append(sanitizeInline(trace.getResourceSourceUrl())).append("\n");
+                }
+                if (!safe(trace.getResourceQuotedExcerpt()).isBlank()) {
+                    markdown.append("- **Resource Excerpt**: ").append(sanitizeInline(trace.getResourceQuotedExcerpt())).append("\n");
+                }
+                if (!safe(trace.getCitationExplanation()).isBlank()) {
+                    markdown.append("- **Citation Explanation**: ").append(sanitizeInline(trace.getCitationExplanation())).append("\n");
+                }
+                markdown.append("\n");
                 index++;
             }
         }
         return markdown.toString();
     }
 
-    private String escapeMarkdownInline(String text) {
+    /**
+     * Flatten a heading to a single line. Line breaks inside a heading would
+     * break the markdown structure, while other characters are kept verbatim
+     * so that embedded markdown is preserved as-is.
+     */
+    private String sanitizeHeading(String text) {
         String normalized = safe(text);
         if (normalized.isBlank()) {
             return "";
         }
-        return normalized
-                .replace("\\", "\\\\")
-                .replace("`", "\\`")
-                .replace("*", "\\*")
-                .replace("_", "\\_")
-                .replace("{", "\\{")
-                .replace("}", "\\}")
-                .replace("[", "\\[")
-                .replace("]", "\\]")
-                .replace("(", "\\(")
-                .replace(")", "\\)")
-                .replace("#", "\\#")
-                .replace("+", "\\+")
-                .replace("-", "\\-")
-                .replace("!", "\\!")
-                .replace("|", "\\|");
+        return normalized.replace('\n', ' ').replace('\r', ' ').trim();
     }
 
-    private String escapeMarkdownBlock(String text) {
+    /**
+     * Minimal cleanup for inline values used on single-line rows (e.g.
+     * "Knowledge Point: xxx" trace rows): only collapse line breaks so the
+     * surrounding row keeps its structure; everything else is left intact so
+     * markdown formatting (emphasis, inline code) still renders.
+     */
+    private String sanitizeInline(String text) {
+        return sanitizeHeading(text);
+    }
+
+    /**
+     * Build one markdown list item. When the value contains multiple lines,
+     * subsequent lines are indented with two spaces so they stay attached to
+     * the same list item without breaking the enclosing list structure.
+     */
+    private String formatListItem(String text) {
         String normalized = safe(text);
         if (normalized.isBlank()) {
-            return "";
+            return "- ";
         }
-        return normalized.lines()
-                .map(this::escapeMarkdownInline)
-                .collect(Collectors.joining("\n"));
+        String[] lines = normalized.split("\\r?\\n");
+        StringBuilder buffer = new StringBuilder();
+        buffer.append("- ").append(lines[0]);
+        for (int i = 1; i < lines.length; i++) {
+            buffer.append("\n  ").append(lines[i]);
+        }
+        return buffer.toString();
     }
 
     private TeachingMaterialTraceDto toTraceDto(TeachingMaterialTrace trace) {
@@ -732,6 +821,11 @@ public class TeachingMaterialService {
         dto.setIdeologyElement(safe(trace.getIdeologyElement()));
         dto.setEvidenceSnippet(safe(trace.getEvidenceSnippet()));
         dto.setMatchReason(safe(trace.getMatchReason()));
+        dto.setResourceTitle(safe(trace.getResourceTitle()));
+        dto.setResourceSource(safe(trace.getResourceSource()));
+        dto.setResourceSourceUrl(safe(trace.getResourceSourceUrl()));
+        dto.setResourceQuotedExcerpt(safe(trace.getResourceQuotedExcerpt()));
+        dto.setCitationExplanation(safe(trace.getCitationExplanation()));
         dto.setCreatedAt(trace.getCreatedAt());
         return dto;
     }
@@ -792,6 +886,11 @@ public class TeachingMaterialService {
             row.setIdeologyElement(trimToLength(safe(item.getIdeologyElement()), 300));
             row.setEvidenceSnippet(trimToLength(safe(item.getEvidenceSnippet()), 1000));
             row.setMatchReason(trimToLength(safe(item.getMatchReason()), 1000));
+            row.setResourceTitle(trimToLength(safe(item.getResourceTitle()), 300));
+            row.setResourceSource(trimToLength(safe(item.getResourceSource()), 200));
+            row.setResourceSourceUrl(trimToLength(safe(item.getResourceSourceUrl()), 500));
+            row.setResourceQuotedExcerpt(trimToLength(safe(item.getResourceQuotedExcerpt()), 1000));
+            row.setCitationExplanation(trimToLength(safe(item.getCitationExplanation()), 1000));
             row.setCreatedAt(LocalDateTime.now());
             teachingMaterialTraceMapper.insert(row);
         }
@@ -869,13 +968,195 @@ public class TeachingMaterialService {
             if (question == null) {
                 continue;
             }
+            String stem = trimToLength(safe(question.getStem()), 2000);
+            String referenceAnswer = trimToLength(safe(question.getReferenceAnswer()), 3000);
+            if (stem.isBlank() || referenceAnswer.isBlank()) {
+                continue;
+            }
             TeachingArtifactsDto.QuestionDto sanitized = new TeachingArtifactsDto.QuestionDto();
-            sanitized.setStem(trimToLength(safe(question.getStem()), 2000));
-            sanitized.setReferenceAnswer(trimToLength(safe(question.getReferenceAnswer()), 3000));
+            sanitized.setQuestionType(normalizeQuestionType(question.getQuestionType()));
+            sanitized.setDifficulty(normalizeDifficulty(question.getDifficulty()));
+            sanitized.setKnowledgePointId(question.getKnowledgePointId());
+            sanitized.setStem(stem);
+            sanitized.setOptions(safeList(question.getOptions()));
+            sanitized.setReferenceAnswer(referenceAnswer);
             sanitized.setScoringPoints(safeList(question.getScoringPoints()));
             questions.add(sanitized);
         }
         return questions;
+    }
+
+    private void requireCompletePublishedQuestions(List<TeachingArtifactsDto.QuestionDto> source) {
+        if (source == null) {
+            return;
+        }
+        for (TeachingArtifactsDto.QuestionDto question : source) {
+            if (question == null) {
+                continue;
+            }
+            String referenceAnswer = safe(question.getReferenceAnswer());
+            if (safe(question.getStem()).isBlank() || referenceAnswer.isBlank()) {
+                throw new IllegalArgumentException("Published assessment questions require stem and reference answer");
+            }
+            String questionType = normalizeQuestionType(question.getQuestionType());
+            List<String> options = safeList(question.getOptions());
+            if (("SINGLE_CHOICE".equals(questionType) || "MULTIPLE_CHOICE".equals(questionType)) && options.isEmpty()) {
+                throw new IllegalArgumentException("Choice assessment questions require options");
+            }
+            if ("SINGLE_CHOICE".equals(questionType) && !isChoiceAnswerCovered(referenceAnswer, options)) {
+                throw new IllegalArgumentException("Single choice reference answer must match one option");
+            }
+            if ("MULTIPLE_CHOICE".equals(questionType) && !areChoiceAnswersCovered(referenceAnswer, options)) {
+                throw new IllegalArgumentException("Multiple choice reference answers must match options");
+            }
+        }
+    }
+
+    private void requireCourseMaterialRules(Long courseId, TeachingMaterialSaveRequestDto request) {
+        if (courseId == null) {
+            return;
+        }
+        CourseMaterialRule rule = loadCourseMaterialRule(courseId);
+        if (rule == null || safe(rule.getRuleJson()).isBlank()) {
+            return;
+        }
+        CourseMaterialRuleConfig config = readCourseMaterialRuleConfig(rule.getRuleJson());
+        int lectureCharacters = countNonWhitespaceCharacters(request == null ? null : request.getLectureNotes());
+        if (lectureCharacters < config.minLectureCharacters()) {
+            throw new IllegalArgumentException("Lecture notes do not satisfy course minimum length rule");
+        }
+        for (String section : config.requiredSections()) {
+            if (!containsText(request == null ? null : request.getLectureNotes(), section)) {
+                throw new IllegalArgumentException("Lecture notes are missing required course section: " + section);
+            }
+        }
+        if (config.requireIdeologyTagInCases()) {
+            List<String> cases = request == null ? null : request.getCases();
+            if (cases == null || cases.stream().noneMatch(this::containsIdeologyTag)) {
+                throw new IllegalArgumentException("Teaching cases require at least one ideology tag");
+            }
+        }
+    }
+
+    private CourseMaterialRule loadCourseMaterialRule(Long courseId) {
+        LambdaQueryWrapper<CourseMaterialRule> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(CourseMaterialRule::getCourseId, courseId)
+                .orderByDesc(CourseMaterialRule::getUpdatedAt)
+                .orderByDesc(CourseMaterialRule::getId)
+                .last("LIMIT 1");
+        return courseMaterialRuleMapper.selectOne(wrapper);
+    }
+
+    private CourseMaterialRuleConfig readCourseMaterialRuleConfig(String ruleJson) {
+        try {
+            JsonNode node = objectMapper.readTree(ruleJson);
+            int minLectureCharacters = Math.max(
+                    node.path(RULE_MIN_LECTURE_CHARACTERS).asInt(DEFAULT_MIN_LECTURE_CHARACTERS), 0);
+            List<String> requiredSections = new ArrayList<>();
+            JsonNode sections = node.path(RULE_REQUIRED_SECTIONS);
+            if (sections.isArray()) {
+                sections.forEach(section -> {
+                    String value = trimToLength(safe(section.asText()), 120);
+                    if (!value.isBlank()) {
+                        requiredSections.add(value);
+                    }
+                });
+            }
+            boolean requireIdeologyTagInCases = node.path(RULE_REQUIRE_IDEOLOGY_TAG_IN_CASES).asBoolean(false);
+            return new CourseMaterialRuleConfig(minLectureCharacters, requiredSections, requireIdeologyTagInCases);
+        } catch (Exception ex) {
+            throw new IllegalArgumentException("Course material rule json is invalid");
+        }
+    }
+
+    private int countNonWhitespaceCharacters(String text) {
+        String normalized = safe(text);
+        if (normalized.isBlank()) {
+            return 0;
+        }
+        return normalized.replaceAll("\\s+", "").length();
+    }
+
+    private boolean containsText(String content, String expected) {
+        return safe(content).toLowerCase(Locale.ROOT).contains(safe(expected).toLowerCase(Locale.ROOT));
+    }
+
+    private boolean containsIdeologyTag(String caseItem) {
+        String normalized = safe(caseItem).toLowerCase(Locale.ROOT);
+        return normalized.contains("[ideology:") || normalized.contains("ideology tag:");
+    }
+
+    private record CourseMaterialRuleConfig(
+            int minLectureCharacters,
+            List<String> requiredSections,
+            boolean requireIdeologyTagInCases) {
+    }
+
+    private boolean areChoiceAnswersCovered(String referenceAnswer, List<String> options) {
+        List<String> answers = splitChoiceAnswers(referenceAnswer);
+        if (answers.isEmpty()) {
+            return false;
+        }
+        return answers.stream().allMatch(answer -> isChoiceAnswerCovered(answer, options));
+    }
+
+    private boolean isChoiceAnswerCovered(String answer, List<String> options) {
+        String normalizedAnswer = normalizeChoiceText(answer);
+        if (normalizedAnswer.isBlank()) {
+            return false;
+        }
+        for (int index = 0; index < options.size(); index++) {
+            String option = safe(options.get(index));
+            if (normalizeChoiceText(option).equals(normalizedAnswer)) {
+                return true;
+            }
+            if (normalizeChoiceText(stripOptionLabel(option)).equals(normalizedAnswer)) {
+                return true;
+            }
+            if (normalizeChoiceText(optionLabel(index)).equals(normalizedAnswer)) {
+                return true;
+            }
+            if (String.valueOf(index + 1).equals(normalizedAnswer)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private List<String> splitChoiceAnswers(String referenceAnswer) {
+        return List.of(safe(referenceAnswer).split("[,，;；、/]+"))
+                .stream()
+                .map(this::safe)
+                .filter(item -> !item.isBlank())
+                .collect(Collectors.toList());
+    }
+
+    private String stripOptionLabel(String option) {
+        return safe(option).replaceFirst("^[A-Za-z0-9]+[\\.、:)）\\s-]+", "").trim();
+    }
+
+    private String optionLabel(int index) {
+        return String.valueOf((char) ('A' + index));
+    }
+
+    private String normalizeChoiceText(String value) {
+        return safe(value).replaceAll("\\s+", "").toUpperCase(Locale.ROOT);
+    }
+
+    private String normalizeQuestionType(String value) {
+        String normalized = safe(value).toUpperCase(Locale.ROOT);
+        if (List.of("SINGLE_CHOICE", "MULTIPLE_CHOICE", "SHORT_ANSWER", "CASE_ANALYSIS").contains(normalized)) {
+            return normalized;
+        }
+        return "SHORT_ANSWER";
+    }
+
+    private String normalizeDifficulty(String value) {
+        String normalized = safe(value).toUpperCase(Locale.ROOT);
+        if (List.of("EASY", "MEDIUM", "HARD").contains(normalized)) {
+            return normalized;
+        }
+        return "MEDIUM";
     }
 
     private String firstNonBlank(String first, String second) {

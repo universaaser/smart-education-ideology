@@ -7,8 +7,14 @@ import com.smartedu.dto.IdeologyMatchDto;
 import com.smartedu.dto.KnowledgePointDto;
 import com.smartedu.dto.KnowledgeNodeView;
 import com.smartedu.dto.PipelineResultDto;
+import com.smartedu.dto.ResourceCitationDto;
 import com.smartedu.dto.TeachingArtifactsDto;
 import com.smartedu.entity.ParseTask;
+import com.smartedu.entity.ParseTaskIdeologyMatch;
+import com.smartedu.entity.ParseTaskKnowledgePoint;
+import com.smartedu.entity.Resource;
+import com.smartedu.mapper.ParseTaskIdeologyMatchMapper;
+import com.smartedu.mapper.ParseTaskKnowledgePointMapper;
 import com.smartedu.mapper.ParseTaskMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -29,10 +35,11 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 
 /**
  * AI 智能服务。
@@ -52,12 +59,25 @@ public class AiIntelligenceService {
     private static final MediaType JSON_MEDIA_TYPE = MediaType.parse("application/json");
     private static final int DEFAULT_MAX_TOKENS = 4096;
     private static final double DEFAULT_TEMPERATURE = 0.7D;
+    public static final String TASK_CHAT = "chat";
+    public static final String TASK_PARSE = "parse";
+    public static final String TASK_IDEOLOGY = "ideology";
+    public static final String TASK_QUESTION_GEN = "question-gen";
+    public static final String TASK_CRAWL = "crawl";
+    public static final String TASK_PATH = "path";
 
     private final ParseTaskMapper parseTaskMapper;
     private final ObjectMapper objectMapper;
     private final KnowledgeIngestionService knowledgeIngestionService;
     private final AiPipelineJsonValidator pipelineJsonValidator;
     private final CourseService courseService;
+    private final ResourceService resourceService;
+    private final DocumentTextExtractor documentTextExtractor;
+    private final MineruParseClient mineruParseClient;
+    private final AiStreamBuffer aiStreamBuffer;
+    private final ParseTaskKnowledgePointMapper parseTaskKnowledgePointMapper;
+    private final ParseTaskIdeologyMatchMapper parseTaskIdeologyMatchMapper;
+    private final VectorIndexAsyncService vectorIndexAsyncService;
 
     // 独立中转站 API 配置
     @Value("${ai.proxy.enabled:true}")
@@ -136,6 +156,32 @@ public class AiIntelligenceService {
     @Value("${ai.routing.failure-threshold:3}")
     private int failureThreshold;
 
+    // 熔断冷却期：达到阈值后等待该秒数再允许一次半开探活，避免熔断后永久跳过。
+    @Value("${ai.routing.circuit-cool-down-seconds:60}")
+    private long circuitCoolDownSeconds;
+
+    // 后台任务回退链：逗号分隔的 provider key 列表，按顺序尝试，未 enabled 的节点会被自动跳过。
+    @Value("${ai.routing.background-chain:openai}")
+    private String backgroundChainConfig;
+
+    @Value("${ai.routes.chat:${ai.routing.default-chat-provider:openai}}")
+    private String chatRoute;
+
+    @Value("${ai.routes.parse:${ai.routing.background-chain:openai}}")
+    private String parseRoute;
+
+    @Value("${ai.routes.ideology:${ai.routing.background-chain:openai}}")
+    private String ideologyRoute;
+
+    @Value("${ai.routes.question-gen:${ai.routing.background-chain:openai}}")
+    private String questionGenerationRoute;
+
+    @Value("${ai.routes.crawl:${ai.routing.background-chain:openai}}")
+    private String crawlRoute;
+
+    @Value("${ai.routes.path:${ai.routing.background-chain:openai}}")
+    private String pathRoute;
+
     // 文档解析流水线配置
     @Value("${ai.pipeline.max-input-chars:5000}")
     private int maxInputChars;
@@ -171,9 +217,10 @@ public class AiIntelligenceService {
     private final Map<String, Integer> providerFailureCounts = new ConcurrentHashMap<>();
 
     /**
-     * 一旦达到失败阈值，就会加入该集合并在后续自动跳过。
+     * 一旦达到失败阈值就加入该映射，value 为熔断起始时间戳（毫秒）。
+     * 冷却期过后允许进入半开状态探活，成功则清除，失败则刷新时间戳继续熔断。
      */
-    private final Set<String> disabledProviders = ConcurrentHashMap.newKeySet();
+    private final Map<String, Long> disabledProviders = new ConcurrentHashMap<>();
 
     /**
      * 后台任务默认入口。
@@ -194,6 +241,10 @@ public class AiIntelligenceService {
      */
     public String chat(List<Map<String, String>> messages, String systemPrompt, String preferredProvider) {
         return callWithProviderChain(messages, systemPrompt, buildPreferredProviderChain(preferredProvider));
+    }
+
+    public String chatForTask(String taskType, List<Map<String, String>> messages, String systemPrompt) {
+        return callWithProviderChain(messages, systemPrompt, buildTaskProviderChain(taskType));
     }
 
     /**
@@ -239,14 +290,10 @@ public class AiIntelligenceService {
     }
 
     /**
-     * Gemini 仍沿用原有预留实现。
-     *
-     * <p>
-     * 为避免引入额外协议差异，当前保持回退到 OpenAI 兼容接口。
+     * Gemini 预留入口。
      */
     private String callGemini(List<Map<String, String>> messages, String systemPrompt) {
-        log.warn("Gemini provider is not implemented, fallback to OpenAI-compatible provider");
-        return callOpenAiCompatible(messages, systemPrompt);
+        throw new RuntimeException("Gemini provider is not implemented");
     }
 
     /**
@@ -374,9 +421,12 @@ public class AiIntelligenceService {
                     String piece = extractTextContent(delta);
                     if (!piece.isEmpty()) {
                         builder.append(piece);
+                        // 把 LLM 流式增量推入 live-log 缓冲，供前端实时查看；
+                        // 未绑定 taskId 的对话调用会被 appendChunk 内部静默忽略。
+                        aiStreamBuffer.appendChunk(piece);
                     }
-                } catch (IOException ignored) {
-                    // 忽略畸形 chunk，继续读取剩余事件
+                } catch (IOException e) {
+                    log.warn("Malformed SSE chunk skipped, payload={}", payload, e);
                 }
             }
         }
@@ -448,17 +498,84 @@ public class AiIntelligenceService {
     }
 
     /**
-     * 后台任务默认链路。
+     * 后台任务默认链路：按 ai.routing.background-chain 配置顺序尝试，
+     * 保持与 default-chat-provider 向后兼容——若 background-chain 未配置则回退到单节点默认值。
      */
     private List<String> buildBackgroundProviderChain() {
-        return List.of(resolveUnifiedProviderKey(defaultChatProvider));
+        List<String> chain = parseProviderChain(backgroundChainConfig);
+        if (chain.isEmpty()) {
+            chain = parseProviderChain(defaultChatProvider);
+        }
+        if (chain.isEmpty()) {
+            chain = List.of("openai");
+        }
+        return chain;
     }
 
     /**
-     * 对话场景链路。
+     * 对话场景链路：前端偏好节点优先，其后附加 background-chain 中剩余节点作为自动回退，
+     * 前端无需感知后台切换逻辑。
      */
     private List<String> buildPreferredProviderChain(String preferredProvider) {
-        return List.of(resolveUnifiedProviderKey(preferredProvider));
+        return appendBackgroundFallback(parseProviderChain(preferredProvider));
+    }
+
+    private List<String> buildTaskProviderChain(String taskType) {
+        return appendBackgroundFallback(parseProviderChain(resolveTaskRoute(taskType)));
+    }
+
+    private List<String> appendBackgroundFallback(List<String> primaryChain) {
+        List<String> chain = new ArrayList<>(primaryChain == null ? List.of() : primaryChain);
+        for (String key : buildBackgroundProviderChain()) {
+            if (!chain.contains(key)) {
+                chain.add(key);
+            }
+        }
+        return chain;
+    }
+
+    private String resolveTaskRoute(String taskType) {
+        String normalized = taskType == null ? "" : taskType.trim().toLowerCase(Locale.ROOT);
+        return switch (normalized) {
+            case TASK_CHAT -> chatRoute;
+            case TASK_PARSE -> parseRoute;
+            case TASK_IDEOLOGY -> ideologyRoute;
+            case TASK_QUESTION_GEN -> questionGenerationRoute;
+            case TASK_CRAWL -> crawlRoute;
+            case TASK_PATH -> pathRoute;
+            default -> backgroundChainConfig;
+        };
+    }
+
+    /**
+     * 解析逗号分隔的 provider 链配置，去重并过滤空串。
+     */
+    private List<String> parseProviderChain(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return List.of();
+        }
+        List<String> result = new ArrayList<>();
+        for (String item : raw.split(",")) {
+            String normalized = normalizeProviderAlias(item);
+            if (normalized.isBlank() || result.contains(normalized)) {
+                continue;
+            }
+            result.add(normalized);
+        }
+        return result;
+    }
+
+    /**
+     * 把历史别名（default）映射到实际的 provider key（proxy），未识别的 key 保留原值由
+     * {@link #getProviderSettings} 再做最终校验。这里不再像旧实现那样把所有节点强制归一到 openai，
+     * 以便真正启用多节点回退。
+     */
+    private String normalizeProviderAlias(String providerKey) {
+        String normalized = normalizeProviderKey(providerKey);
+        if ("default".equals(normalized)) {
+            return "proxy";
+        }
+        return normalized;
     }
 
     /**
@@ -479,7 +596,7 @@ public class AiIntelligenceService {
                 errors.add(providerKey + " disabled by config");
                 continue;
             }
-            if (disabledProviders.contains(providerSettings.key())) {
+            if (isCircuitOpen(providerSettings.key())) {
                 errors.add(providerKey + " disabled by circuit breaker");
                 continue;
             }
@@ -585,18 +702,42 @@ public class AiIntelligenceService {
     }
 
     /**
-     * 连续失败达到阈值后直接熔断。
+     * 连续失败达到阈值后直接熔断，同时记录熔断起始时间以便半开探活。
      */
     private void markProviderFailure(String providerKey, RuntimeException ex) {
         int safeThreshold = Math.max(failureThreshold, 1);
         int failures = providerFailureCounts.merge(providerKey, 1, Integer::sum);
         if (failures >= safeThreshold) {
-            disabledProviders.add(providerKey);
-            log.error("AI provider disabled after consecutive failures: provider={}, failures={}", providerKey, failures, ex);
+            disabledProviders.put(providerKey, System.currentTimeMillis());
+            log.error("AI provider disabled after consecutive failures: provider={}, failures={}", providerKey,
+                    failures, ex);
             return;
         }
 
         log.warn("AI provider call failed: provider={}, failures={}", providerKey, failures, ex);
+    }
+
+    /**
+     * 判断熔断是否仍然生效。冷却期过后自动移除标记，允许一次半开探活；
+     * 若探活失败会在 {@link #markProviderFailure} 里重新打上时间戳继续熔断。
+     */
+    private boolean isCircuitOpen(String providerKey) {
+        Long disabledSince = disabledProviders.get(providerKey);
+        if (disabledSince == null) {
+            return false;
+        }
+        long coolDownMillis = Math.max(circuitCoolDownSeconds, 0) * 1000L;
+        if (coolDownMillis <= 0) {
+            return true;
+        }
+        if (System.currentTimeMillis() - disabledSince >= coolDownMillis) {
+            // 冷却期已过：清除熔断标记和失败计数，允许下一次请求真正尝试。
+            disabledProviders.remove(providerKey);
+            providerFailureCounts.remove(providerKey);
+            log.info("AI provider circuit half-open after cool-down: provider={}", providerKey);
+            return false;
+        }
+        return true;
     }
 
     private String normalizeProviderKey(String providerKey) {
@@ -604,22 +745,6 @@ public class AiIntelligenceService {
             return "";
         }
         return providerKey.trim().toLowerCase();
-    }
-
-    /**
-     * The user requires one runtime AI endpoint for chat and every background AI workflow,
-     * so legacy provider aliases are normalized to the local OpenAI-compatible config.
-     */
-    private String resolveUnifiedProviderKey(String providerKey) {
-        String normalized = normalizeProviderKey(providerKey);
-        if (normalized.isBlank()
-                || "default".equals(normalized)
-                || "proxy".equals(normalized)
-                || "deepseek".equals(normalized)
-                || "gemini".equals(normalized)) {
-            return "openai";
-        }
-        return normalized;
     }
 
     private boolean shouldPreferResponsesApi(String model) {
@@ -632,7 +757,8 @@ public class AiIntelligenceService {
 
     /**
      * The localhost OpenAI-compatible proxy exposes GPT-5 text only via streaming
-     * chat.completions, so /responses must be skipped there to avoid a guaranteed empty call.
+     * chat.completions, so /responses must be skipped there to avoid a guaranteed
+     * empty call.
      */
     private boolean shouldPreferResponsesApi(String apiBase, String model) {
         return shouldPreferResponsesApi(model) && !isLocalCompatibleBaseUrl(apiBase);
@@ -698,23 +824,6 @@ public class AiIntelligenceService {
             return responseBody;
         }
         return responseBody;
-    }
-
-    private String extractChatCompletionContent(JsonNode jsonNode) {
-        if (jsonNode == null) {
-            return "";
-        }
-        JsonNode choiceNode = jsonNode.path("choices").path(0);
-        if (choiceNode.isMissingNode()) {
-            return "";
-        }
-
-        String messageContent = extractTextContent(choiceNode.path("message").path("content"));
-        if (!messageContent.isBlank()) {
-            return messageContent;
-        }
-
-        return extractTextContent(choiceNode.path("text"));
     }
 
     private String extractResponsesContent(JsonNode jsonNode) {
@@ -808,10 +917,11 @@ public class AiIntelligenceService {
         List<Map<String, String>> messages = new ArrayList<>();
         Map<String, String> userMsg = new HashMap<>();
         userMsg.put("role", "user");
-        userMsg.put("content", "Analyze the ideological value in the following subject content for \"" + subject + "\" and provide classroom integration suggestions:\n\n" + technicalContent);
+        userMsg.put("content", "Analyze the ideological value in the following subject content for \"" + subject
+                + "\" and provide classroom integration suggestions:\n\n" + technicalContent);
         messages.add(userMsg);
 
-        return chat(messages, systemPrompt);
+        return chatForTask(TASK_IDEOLOGY, messages, systemPrompt);
     }
 
     /**
@@ -825,21 +935,42 @@ public class AiIntelligenceService {
             return;
         }
 
+        // 绑定实时日志上下文：后续 executeStage / readChatCompletionStream 会向该缓冲写入内容。
+        aiStreamBuffer.beginTask(taskId);
         try {
             runPipeline(task, true, 1);
             log.info("Document parse completed: taskId={}", taskId);
         } catch (Exception e) {
             log.error("Document parse failed: taskId={}", taskId, e);
-            task.setStatus("FAILED");
-            task.setErrorMessage(e.getMessage());
-            task.setUpdatedAt(LocalDateTime.now());
-            parseTaskMapper.updateById(task);
+            // 终态写入必须独立于 runPipeline 的内存态 task：
+            // 之前 runPipeline 可能已经把巨型 pipelineResult JSON 塞进 task.aiAnalysis；
+            // 如果抛出的异常正是由该字段过大/写库失败触发，
+            // 用同一个 task 再次 updateById 会继续失败，任务会永远卡在 ANALYZING。
+            // 这里从 DB 重载一份纯净 task，仅翻 status/currentStep/errorMessage 落库。
+            try {
+                ParseTask finalTask = parseTaskMapper.selectById(taskId);
+                if (finalTask != null) {
+                    recordTaskFailure(finalTask, e, List.of(), "Pipeline failed");
+                }
+            } catch (Exception persistEx) {
+                log.error("Failed to persist FAILED status for taskId={}", taskId, persistEx);
+            }
+        } finally {
+            aiStreamBuffer.endTask();
         }
     }
 
     /**
      * 基于已有解析结果重新生成结构化教学内容。
      */
+    public ParseTask reparseTask(Long taskId) {
+        return restartTask(taskId, "COMPLETED", "Reparse requested");
+    }
+
+    public ParseTask retryTask(Long taskId) {
+        return restartTask(taskId, "FAILED", "Retry requested");
+    }
+
     public PipelineResultDto regenerateTask(Long taskId) {
         ParseTask task = parseTaskMapper.selectById(taskId);
         if (task == null) {
@@ -851,14 +982,39 @@ public class AiIntelligenceService {
 
         try {
             updateTaskProgress(task, "ANALYZING", 55, "Regenerating teaching pipeline...");
+            deleteProjectionsByTaskId(taskId);
             return runPipeline(task, false, Math.max(1, regenerateRetry + 1));
         } catch (RuntimeException ex) {
-            task.setStatus("FAILED");
-            task.setErrorMessage(ex.getMessage());
-            task.setUpdatedAt(LocalDateTime.now());
-            parseTaskMapper.updateById(task);
+            recordTaskFailure(task, ex, List.of(), "Regenerate failed");
             throw ex;
         }
+    }
+
+    private ParseTask restartTask(Long taskId, String requiredStatus, String currentStep) {
+        ParseTask task = parseTaskMapper.selectById(taskId);
+        if (task == null) {
+            throw new RuntimeException("Parse task not found");
+        }
+        if (!requiredStatus.equalsIgnoreCase(safe(task.getStatus()))) {
+            throw new RuntimeException("Task status does not support this action: " + safe(task.getStatus()));
+        }
+
+        deleteProjectionsByTaskId(taskId);
+        vectorIndexAsyncService.deletePipelineResult(taskId);
+        aiStreamBuffer.discard(taskId);
+
+        task.setStatus("UPLOADING");
+        task.setProgress(10);
+        task.setCurrentStep(currentStep);
+        task.setParsedContent(null);
+        task.setAiAnalysis(null);
+        task.setErrorMessage(null);
+        task.setStartedAt(LocalDateTime.now());
+        task.setCompletedAt(null);
+        task.setUpdatedAt(LocalDateTime.now());
+        parseTaskMapper.updateById(task);
+
+        return task;
     }
 
     /**
@@ -873,48 +1029,120 @@ public class AiIntelligenceService {
     }
 
     private PipelineResultDto runPipeline(ParseTask task, boolean includeDocumentParse, int pipelineAttempts) {
-        String rawContent = readFileContent(task.getFilePath());
         String fileName = extractFileName(task.getFilePath());
         String courseContext = buildCourseContext(task.getCourseId());
         List<String> warnings = new ArrayList<>();
         boolean inferred = false;
 
+        // 以 MinerU 为文档解析首选，失败/未配置时回退到本地 POI/PDFBox 抽取。
+        // rawContent 后续被所有 LLM 阶段当作原文输入；parseMode/rawMarkdown 存入 DocumentStructureDto
+        // 便于追溯。
+        String rawContent;
+        String rawMarkdown = null;
+        String parseMode;
+        // MinerU 结构化产物（大纲 / 表格 / 图片 / 公式 / 统计），LLM 阶段用于生成更贴合章节的结果。
+        com.smartedu.dto.mineru.MineruStructuredContentDto mineruStructured = null;
+        if (includeDocumentParse) {
+            updateTaskProgress(task, "PARSING", 15, "Parsing document with MinerU...");
+            MineruParseClient.MineruParseResult mineru = tryMineruParse(task, fileName, warnings);
+            if (mineru != null && mineru.markdown != null && !mineru.markdown.isBlank()) {
+                rawContent = mineru.markdown;
+                rawMarkdown = mineru.markdown;
+                parseMode = "MINERU";
+                mineruStructured = mineru.structuredContent;
+                aiStreamBuffer.appendStage("mineru-parse ok batchId=" + mineru.batchId
+                        + (mineruStructured != null && mineruStructured.getStats() != null
+                                ? " pages=" + mineruStructured.getStats().getPageCount()
+                                : ""));
+                // 立刻把 markdown 写入 parsedContent，前端“Parsed Content Summary”可直接渲染。
+                task.setParsedContent(rawMarkdown);
+                task.setUpdatedAt(LocalDateTime.now());
+                parseTaskMapper.updateById(task);
+            } else {
+                rawContent = readFileContent(task.getFilePath());
+                parseMode = "FALLBACK_LLM";
+                aiStreamBuffer.appendStage("mineru-parse unavailable, fallback to text extractor");
+                // 回退路径同样把可读原文落 parsedContent，避免前端看到上一次遗留内容。
+                if (rawContent != null && !rawContent.isBlank()) {
+                    task.setParsedContent(rawContent);
+                    task.setUpdatedAt(LocalDateTime.now());
+                    parseTaskMapper.updateById(task);
+                }
+            }
+        } else {
+            // regenerate 场景：parsedContent 现在可能是 markdown/纯文本，不再是结构化 JSON；
+            // 直接当作原文交给 LLM 阶段，无需反序列化。
+            rawContent = task.getParsedContent();
+            parseMode = "REGENERATE";
+            rawMarkdown = extractExistingRawMarkdown(task);
+            if (rawContent == null || rawContent.isBlank()) {
+                // 兜底：旧任务 parsedContent 可能是结构化 JSON，从 aiAnalysis 结构里把 markdown/概要捞出来。
+                rawContent = rawMarkdown;
+            }
+            warnings.add("Document structure rebuilt from existing parsed content for regenerate.");
+        }
+
         DocumentStructureDto structure;
         if (includeDocumentParse) {
-            updateTaskProgress(task, "PARSING", 20, "Parsing document structure...");
+            updateTaskProgress(task, "PARSING", 25, "Extracting document structure...");
             StageResult<DocumentStructureDto> parseResult = parseDocumentStructure(rawContent, fileName, courseContext);
             structure = parseResult.data();
             warnings.addAll(parseResult.warnings());
             inferred = inferred || parseResult.inferred();
-            task.setParsedContent(writeJsonSafely(structure));
+            if (rawMarkdown != null) {
+                structure.setRawMarkdown(rawMarkdown);
+            }
+            structure.setParseMode(parseMode);
+            if (mineruStructured != null) {
+                structure.setMineruContent(mineruStructured);
+                // 用 MinerU 大纲回填 structure.chapterOutline / teachingFocus，保证 LLM 幻觉导致的空结果也能兜底。
+                if (structure.getChapterOutline() == null || structure.getChapterOutline().isEmpty()) {
+                    structure.setChapterOutline(collectOutlineTitles(mineruStructured));
+                }
+            }
             task.setUpdatedAt(LocalDateTime.now());
             parseTaskMapper.updateById(task);
         } else {
-            try {
-                structure = objectMapper.readValue(task.getParsedContent(), DocumentStructureDto.class);
-            } catch (Exception ex) {
-                throw new RuntimeException("Existing parsed content is invalid JSON", ex);
+            DocumentStructureDto existing = loadExistingStructure(task);
+            if (existing != null) {
+                structure = existing;
+            } else {
+                // 老任务可能只有 parsedContent 是结构化 JSON，保留一次兼容读取。
+                try {
+                    structure = objectMapper.readValue(task.getParsedContent(), DocumentStructureDto.class);
+                } catch (Exception ex) {
+                    throw new RuntimeException("Existing parsed content is invalid: unable to reuse structure", ex);
+                }
             }
-            warnings.add("Document structure reused from existing parsed content.");
+            if (rawMarkdown == null && structure.getRawMarkdown() != null) {
+                rawMarkdown = structure.getRawMarkdown();
+            }
+            if (structure.getParseMode() == null || structure.getParseMode().isBlank()) {
+                structure.setParseMode(parseMode);
+            }
+            // 沿用原结构化产物，避免 regenerate 阶段把已有 MinerU 数据丢失。
+            if (mineruStructured == null && structure.getMineruContent() != null) {
+                mineruStructured = structure.getMineruContent();
+            }
         }
 
         updateTaskProgress(task, "PARSING", 40, "Extracting knowledge points...");
-        StageResult<List<KnowledgePointDto>> knowledgeResult =
-                extractKnowledgePoints(structure, truncateInput(rawContent), fileName, courseContext);
+        StageResult<List<KnowledgePointDto>> knowledgeResult = extractKnowledgePoints(structure,
+                truncateInput(rawContent), fileName, courseContext);
         List<KnowledgePointDto> knowledgePoints = knowledgeResult.data();
         warnings.addAll(knowledgeResult.warnings());
         inferred = inferred || knowledgeResult.inferred();
 
         updateTaskProgress(task, "ANALYZING", 60, "Matching ideology elements...");
-        StageResult<List<IdeologyMatchDto>> ideologyResult =
-                matchIdeologyElements(structure, knowledgePoints, courseContext);
+        StageResult<List<IdeologyMatchDto>> ideologyResult = matchIdeologyElements(structure, knowledgePoints,
+                courseContext);
         List<IdeologyMatchDto> ideologyMatches = ideologyResult.data();
         warnings.addAll(ideologyResult.warnings());
         inferred = inferred || ideologyResult.inferred();
 
         updateTaskProgress(task, "ANALYZING", 80, "Generating teaching artifacts...");
-        StageResult<TeachingArtifactsDto> artifactResult =
-                generateTeachingArtifacts(structure, knowledgePoints, ideologyMatches, courseContext);
+        StageResult<TeachingArtifactsDto> artifactResult = generateTeachingArtifacts(structure, knowledgePoints,
+                ideologyMatches, courseContext);
         TeachingArtifactsDto artifacts = artifactResult.data();
         warnings.addAll(artifactResult.warnings());
         inferred = inferred || artifactResult.inferred();
@@ -931,21 +1159,39 @@ public class AiIntelligenceService {
         task.setAiAnalysis(writeJsonSafely(pipelineResult));
         task.setUpdatedAt(LocalDateTime.now());
         parseTaskMapper.updateById(task);
+        persistPipelineProjections(task, pipelineResult);
+        vectorIndexAsyncService.indexPipelineResult(task, pipelineResult);
 
-        updateTaskProgress(task, "ANALYZING", 90, "Syncing knowledge points and sources...");
-        knowledgeIngestionService.ingestParseTask(task);
+        // P1: 只有真正跑出非兜底结果才写入主题知识库/资源库，避免 stub 数据污染图谱。
+        if (!inferred) {
+            updateTaskProgress(task, "ANALYZING", 90, "Syncing knowledge points and sources...");
+            knowledgeIngestionService.ingestParseTask(task);
 
-        task.setStatus("COMPLETED");
-        task.setProgress(100);
-        task.setCurrentStep("Completed");
-        task.setCompletedAt(LocalDateTime.now());
-        parseTaskMapper.updateById(task);
+            task.setStatus("COMPLETED");
+            task.setProgress(100);
+            task.setCurrentStep("Completed");
+            task.setCompletedAt(LocalDateTime.now());
+            task.setErrorMessage(null);
+            parseTaskMapper.updateById(task);
+        } else {
+            // 所有阶段都回退到 stub：任务视为失败，不入库，errorMessage 汇总 warnings 供前端/运维排查。
+            recordTaskFailure(task, null, warnings, "AI pipeline fell back to stub; knowledge graph not updated.");
+        }
 
         // regenerate-retry 用于重新生成场景；首次流程固定为 1 次重试。
         if (pipelineAttempts > 1 && inferred) {
             for (int i = 1; i < pipelineAttempts; i++) {
                 PipelineResultDto retryResult = tryRebuildFromParsedContent(task, structure, rawContent, courseContext);
                 if (!retryResult.isInferred()) {
+                    // 重试成功：补做一次入库并把任务置为 COMPLETED。
+                    updateTaskProgress(task, "ANALYZING", 90, "Syncing knowledge points and sources...");
+                    knowledgeIngestionService.ingestParseTask(task);
+                    task.setStatus("COMPLETED");
+                    task.setProgress(100);
+                    task.setCurrentStep("Completed");
+                    task.setCompletedAt(LocalDateTime.now());
+                    task.setErrorMessage(null);
+                    parseTaskMapper.updateById(task);
                     return retryResult;
                 }
             }
@@ -960,12 +1206,12 @@ public class AiIntelligenceService {
             String rawContent,
             String courseContext) {
         List<String> warnings = new ArrayList<>();
-        StageResult<List<KnowledgePointDto>> knowledgeResult =
-                extractKnowledgePoints(structure, truncateInput(rawContent), extractFileName(task.getFilePath()), courseContext);
-        StageResult<List<IdeologyMatchDto>> ideologyResult =
-                matchIdeologyElements(structure, knowledgeResult.data(), courseContext);
-        StageResult<TeachingArtifactsDto> artifactResult =
-                generateTeachingArtifacts(structure, knowledgeResult.data(), ideologyResult.data(), courseContext);
+        StageResult<List<KnowledgePointDto>> knowledgeResult = extractKnowledgePoints(structure,
+                truncateInput(rawContent), extractFileName(task.getFilePath()), courseContext);
+        StageResult<List<IdeologyMatchDto>> ideologyResult = matchIdeologyElements(structure, knowledgeResult.data(),
+                courseContext);
+        StageResult<TeachingArtifactsDto> artifactResult = generateTeachingArtifacts(structure, knowledgeResult.data(),
+                ideologyResult.data(), courseContext);
         boolean inferred = knowledgeResult.inferred() || ideologyResult.inferred() || artifactResult.inferred();
 
         warnings.addAll(knowledgeResult.warnings());
@@ -984,6 +1230,8 @@ public class AiIntelligenceService {
         task.setAiAnalysis(writeJsonSafely(pipelineResult));
         task.setUpdatedAt(LocalDateTime.now());
         parseTaskMapper.updateById(task);
+        persistPipelineProjections(task, pipelineResult);
+        vectorIndexAsyncService.indexPipelineResult(task, pipelineResult);
         return pipelineResult;
     }
 
@@ -1031,6 +1279,7 @@ public class AiIntelligenceService {
                 "document-structure",
                 systemPrompt,
                 userPrompt,
+                TASK_PARSE,
                 this::validateDocumentStructure,
                 this::buildDocumentStructureFallback);
     }
@@ -1046,8 +1295,10 @@ public class AiIntelligenceService {
                 Allowed keys: knowledgePoints.
                 Required keys: knowledgePoints.
                 knowledgePoints is an array.
-                Each item keys: pointName, definition, chapter, importance, evidenceSnippet.
+                Each item keys: pointName, definition, chapter, importance, evidenceSnippet, resourceCitations.
                 importance must be HIGH or MEDIUM or LOW.
+                resourceCitations is an array with max 3 items.
+                Each citation keys: resourceRefId, resourceId, title, source, sourceUrl, quotedExcerpt, citationReason.
                 No extra keys and no markdown.
                 """;
         String userPrompt = """
@@ -1060,17 +1311,26 @@ public class AiIntelligenceService {
                 %s
                 Content:
                 %s
-                """.formatted(
-                maxKnowledgePoints,
-                fileName,
-                safeCourseContext(courseContext),
-                writeJsonSafely(structure),
-                rawContent);
+
+                Keep evidenceSnippet grounded in the uploaded document.
+                If related resource excerpts are present in Course context, add up to 3 resourceCitations per knowledge point.
+                resourceRefId must reuse the ids shown in Course context such as R1 or R2.
+                quotedExcerpt must quote or paraphrase the provided resource excerpt only, not invent new source text.
+                citationReason must explain why that resource helps interpret the knowledge point.
+                If no related resource applies, return an empty resourceCitations array.
+                """
+                .formatted(
+                        maxKnowledgePoints,
+                        fileName,
+                        safeCourseContext(courseContext),
+                        writeStructureForPrompt(structure),
+                        rawContent);
 
         return executeStage(
                 "knowledge-point-extraction",
                 systemPrompt,
                 userPrompt,
+                TASK_PARSE,
                 this::validateKnowledgePoints,
                 this::buildKnowledgePointFallback);
     }
@@ -1085,9 +1345,12 @@ public class AiIntelligenceService {
                 Allowed keys: ideologyMatches.
                 Required keys: ideologyMatches.
                 ideologyMatches is an array.
-                Each item keys: knowledgePointName, ideologyElement, matchReason, confidence.
+                Each item keys: knowledgePointName, ideologyElement, matchReason, confidence, citationExplanation, resourceCitations.
                 confidence must be integer between 0 and 100.
                 ideologyElement must be one short phrase.
+                citationExplanation must explain the ideology match with support from resource excerpts when available.
+                resourceCitations is an array with max 3 items.
+                Each citation keys: resourceRefId, resourceId, title, source, sourceUrl, quotedExcerpt, citationReason.
                 No extra keys and no markdown.
                 """;
         String userPrompt = """
@@ -1099,16 +1362,24 @@ public class AiIntelligenceService {
                 %s
                 Knowledge points:
                 %s
-                """.formatted(
-                maxIdeologyMatchesPerPoint,
-                safeCourseContext(courseContext),
-                writeJsonSafely(structure),
-                writeJsonSafely(knowledgePoints));
+
+                When related resource excerpts are present in Course context, use them to support ideology matching.
+                citationExplanation should explain why the ideology element is justified by the knowledge point together with the cited resource excerpts.
+                resourceRefId must reuse the ids shown in Course context such as R1 or R2.
+                quotedExcerpt must stay within the provided resource excerpt content.
+                If no related resource applies, return an empty resourceCitations array and an empty citationExplanation string.
+                """
+                .formatted(
+                        maxIdeologyMatchesPerPoint,
+                        safeCourseContext(courseContext),
+                        writeStructureForPrompt(structure),
+                        writeJsonSafely(knowledgePoints));
 
         return executeStage(
                 "ideology-matching",
                 systemPrompt,
                 userPrompt,
+                TASK_IDEOLOGY,
                 this::validateIdeologyMatches,
                 ignored -> buildIdeologyMatchFallback(knowledgePoints));
     }
@@ -1125,8 +1396,11 @@ public class AiIntelligenceService {
                 Required keys: lectureNotes, cases, questions.
                 cases is an array of short case texts.
                 questions is an array.
-                Each question keys: stem, referenceAnswer, scoringPoints.
-                scoringPoints is an array of short strings.
+                Each question keys: questionType, difficulty, knowledgePointId, stem, options, referenceAnswer, scoringPoints.
+                questionType must be SINGLE_CHOICE, MULTIPLE_CHOICE, SHORT_ANSWER, or CASE_ANALYSIS.
+                difficulty must be EASY, MEDIUM, or HARD.
+                knowledgePointId may be null when no reliable id exists.
+                options and scoringPoints are arrays of short strings.
                 No extra keys and no markdown.
                 """;
         String userPrompt = """
@@ -1143,7 +1417,7 @@ public class AiIntelligenceService {
                 """.formatted(
                 maxQuestions,
                 safeCourseContext(courseContext),
-                writeJsonSafely(structure),
+                writeStructureForPrompt(structure),
                 writeJsonSafely(knowledgePoints),
                 writeJsonSafely(ideologyMatches));
 
@@ -1151,6 +1425,7 @@ public class AiIntelligenceService {
                 "teaching-artifact-generation",
                 systemPrompt,
                 userPrompt,
+                TASK_QUESTION_GEN,
                 this::validateTeachingArtifacts,
                 this::buildTeachingArtifactsFallback);
     }
@@ -1159,14 +1434,16 @@ public class AiIntelligenceService {
             String stageName,
             String systemPrompt,
             String userPrompt,
+            String taskType,
             StageValidator<T> validator,
             StageFallback<T> fallbackSupplier) {
         List<String> warnings = new ArrayList<>();
         RuntimeException lastException = null;
         int attempts = 2;
         for (int attempt = 1; attempt <= attempts; attempt++) {
+            aiStreamBuffer.appendStage(stageName + " attempt " + attempt);
             try {
-                String result = callStructuredPrompt(systemPrompt, userPrompt);
+                String result = callStructuredPrompt(taskType, systemPrompt, userPrompt);
                 T validated = validator.validate(result);
                 return new StageResult<>(validated, warnings, false);
             } catch (RuntimeException ex) {
@@ -1175,18 +1452,19 @@ public class AiIntelligenceService {
             }
         }
 
+        aiStreamBuffer.appendStage(stageName + " fallback used (stub)");
         T fallback = fallbackSupplier.fallback(lastException);
         warnings.add(stageName + " fallback used.");
         return new StageResult<>(fallback, warnings, true);
     }
 
-    private String callStructuredPrompt(String systemPrompt, String userPrompt) {
+    private String callStructuredPrompt(String taskType, String systemPrompt, String userPrompt) {
         List<Map<String, String>> messages = new ArrayList<>();
         Map<String, String> userMsg = new HashMap<>();
         userMsg.put("role", "user");
         userMsg.put("content", userPrompt);
         messages.add(userMsg);
-        return chat(messages, systemPrompt);
+        return chatForTask(taskType, messages, systemPrompt);
     }
 
     private DocumentStructureDto validateDocumentStructure(String rawJson) {
@@ -1222,8 +1500,9 @@ public class AiIntelligenceService {
         for (JsonNode pointNode : points) {
             pipelineJsonValidator.parseObject(
                     pointNode.toString(),
-                    List.of("pointName", "definition", "chapter", "importance", "evidenceSnippet"),
-                    List.of("pointName", "definition", "chapter", "importance", "evidenceSnippet"));
+                    List.of("pointName", "definition", "chapter", "importance", "evidenceSnippet", "resourceCitations"),
+                    List.of("pointName", "definition", "chapter", "importance", "evidenceSnippet",
+                            "resourceCitations"));
 
             String importance = safeText(pointNode.get("importance"));
             if (!List.of("HIGH", "MEDIUM", "LOW").contains(importance)) {
@@ -1235,6 +1514,7 @@ public class AiIntelligenceService {
             dto.setDefinition(trimToLength(dto.getDefinition(), 500));
             dto.setChapter(trimToLength(dto.getChapter(), 120));
             dto.setEvidenceSnippet(trimToLength(dto.getEvidenceSnippet(), 300));
+            dto.setResourceCitations(sanitizeResourceCitations(pointNode.get("resourceCitations")));
             result.add(dto);
         }
         return result;
@@ -1250,14 +1530,17 @@ public class AiIntelligenceService {
         if (matchesNode == null || !matchesNode.isArray()) {
             throw new IllegalArgumentException("ideologyMatches must be an array");
         }
-        pipelineJsonValidator.validateArraySize(node, "ideologyMatches", Math.max(1, maxKnowledgePoints * maxIdeologyMatchesPerPoint));
+        pipelineJsonValidator.validateArraySize(node, "ideologyMatches",
+                Math.max(1, maxKnowledgePoints * maxIdeologyMatchesPerPoint));
 
         List<IdeologyMatchDto> result = new ArrayList<>();
         for (JsonNode matchNode : matchesNode) {
             pipelineJsonValidator.parseObject(
                     matchNode.toString(),
-                    List.of("knowledgePointName", "ideologyElement", "matchReason", "confidence"),
-                    List.of("knowledgePointName", "ideologyElement", "matchReason", "confidence"));
+                    List.of("knowledgePointName", "ideologyElement", "matchReason", "confidence", "citationExplanation",
+                            "resourceCitations"),
+                    List.of("knowledgePointName", "ideologyElement", "matchReason", "confidence", "citationExplanation",
+                            "resourceCitations"));
 
             int confidence = matchNode.get("confidence").asInt(-1);
             if (confidence < 0 || confidence > 100) {
@@ -1268,6 +1551,8 @@ public class AiIntelligenceService {
             dto.setKnowledgePointName(trimToLength(dto.getKnowledgePointName(), 120));
             dto.setIdeologyElement(trimToLength(dto.getIdeologyElement(), 120));
             dto.setMatchReason(trimToLength(dto.getMatchReason(), 500));
+            dto.setCitationExplanation(trimToLength(dto.getCitationExplanation(), 600));
+            dto.setResourceCitations(sanitizeResourceCitations(matchNode.get("resourceCitations")));
             result.add(dto);
         }
         return result;
@@ -1290,13 +1575,18 @@ public class AiIntelligenceService {
             pipelineJsonValidator.parseObject(
                     questionNode.toString(),
                     List.of("stem", "referenceAnswer", "scoringPoints"),
-                    List.of("stem", "referenceAnswer", "scoringPoints"));
+                    List.of("questionType", "difficulty", "knowledgePointId", "stem", "options", "referenceAnswer",
+                            "scoringPoints"));
+            if (questionNode.get("options") != null && !questionNode.get("options").isArray()) {
+                throw new IllegalArgumentException("options must be an array");
+            }
             if (questionNode.get("scoringPoints") == null || !questionNode.get("scoringPoints").isArray()) {
                 throw new IllegalArgumentException("scoringPoints must be an array");
             }
         }
 
         TeachingArtifactsDto dto = objectMapper.convertValue(node, TeachingArtifactsDto.class);
+        dto.setQuestions(sanitizeQuestionList(dto.getQuestions()));
         dto.setLectureNotes(trimToLength(dto.getLectureNotes(), 5000));
         if (dto.getCases() == null) {
             dto.setCases(new ArrayList<>());
@@ -1305,6 +1595,54 @@ public class AiIntelligenceService {
             dto.setQuestions(new ArrayList<>());
         }
         return dto;
+    }
+
+    private List<TeachingArtifactsDto.QuestionDto> sanitizeQuestionList(List<TeachingArtifactsDto.QuestionDto> source) {
+        List<TeachingArtifactsDto.QuestionDto> questions = new ArrayList<>();
+        if (source == null) {
+            return questions;
+        }
+        for (TeachingArtifactsDto.QuestionDto question : source) {
+            if (question == null) {
+                continue;
+            }
+            TeachingArtifactsDto.QuestionDto sanitized = new TeachingArtifactsDto.QuestionDto();
+            sanitized.setQuestionType(normalizeQuestionType(question.getQuestionType()));
+            sanitized.setDifficulty(normalizeDifficulty(question.getDifficulty()));
+            sanitized.setKnowledgePointId(question.getKnowledgePointId());
+            sanitized.setStem(trimToLength(question.getStem(), 2000));
+            sanitized.setOptions(trimStringList(question.getOptions(), 1000));
+            sanitized.setReferenceAnswer(trimToLength(question.getReferenceAnswer(), 3000));
+            sanitized.setScoringPoints(trimStringList(question.getScoringPoints(), 2000));
+            questions.add(sanitized);
+        }
+        return questions;
+    }
+
+    private String normalizeQuestionType(String value) {
+        String normalized = safe(value).toUpperCase(Locale.ROOT);
+        if (List.of("SINGLE_CHOICE", "MULTIPLE_CHOICE", "SHORT_ANSWER", "CASE_ANALYSIS").contains(normalized)) {
+            return normalized;
+        }
+        return "SHORT_ANSWER";
+    }
+
+    private String normalizeDifficulty(String value) {
+        String normalized = safe(value).toUpperCase(Locale.ROOT);
+        if (List.of("EASY", "MEDIUM", "HARD").contains(normalized)) {
+            return normalized;
+        }
+        return "MEDIUM";
+    }
+
+    private List<String> trimStringList(List<String> source, int maxLength) {
+        if (source == null) {
+            return new ArrayList<>();
+        }
+        return source.stream()
+                .map(item -> trimToLength(item, maxLength))
+                .filter(item -> !item.isBlank())
+                .collect(Collectors.toCollection(ArrayList::new));
     }
 
     private DocumentStructureDto buildDocumentStructureFallback(RuntimeException ex) {
@@ -1319,23 +1657,28 @@ public class AiIntelligenceService {
 
     private List<KnowledgePointDto> buildKnowledgePointFallback(RuntimeException ex) {
         List<KnowledgePointDto> fallback = new ArrayList<>();
-        fallback.add(new KnowledgePointDto(
-                "Pending Knowledge Point",
-                "Knowledge extraction fallback result.",
-                "Unknown Chapter",
-                "MEDIUM",
-                "No reliable evidence snippet from provider."));
+        KnowledgePointDto point = new KnowledgePointDto();
+        point.setPointName("Pending Knowledge Point");
+        point.setDefinition("Knowledge extraction fallback result.");
+        point.setChapter("Unknown Chapter");
+        point.setImportance("MEDIUM");
+        point.setEvidenceSnippet("No reliable evidence snippet from provider.");
+        point.setResourceCitations(new ArrayList<>());
+        fallback.add(point);
         return fallback;
     }
 
     private List<IdeologyMatchDto> buildIdeologyMatchFallback(List<KnowledgePointDto> points) {
         List<IdeologyMatchDto> fallback = new ArrayList<>();
         for (KnowledgePointDto point : points) {
-            fallback.add(new IdeologyMatchDto(
-                    point.getPointName(),
-                    "Craftsmanship Spirit",
-                    "Fallback ideology mapping due to provider instability.",
-                    55));
+            IdeologyMatchDto match = new IdeologyMatchDto();
+            match.setKnowledgePointName(point.getPointName());
+            match.setIdeologyElement("Craftsmanship Spirit");
+            match.setMatchReason("Fallback ideology mapping due to provider instability.");
+            match.setConfidence(55);
+            match.setCitationExplanation("");
+            match.setResourceCitations(new ArrayList<>());
+            fallback.add(match);
         }
         return fallback;
     }
@@ -1346,7 +1689,11 @@ public class AiIntelligenceService {
         fallback.setCases(List.of("Case generation is pending due to provider fallback."));
         fallback.setQuestions(List.of(
                 new TeachingArtifactsDto.QuestionDto(
+                        "SHORT_ANSWER",
+                        "MEDIUM",
+                        null,
                         "Explain the key concept and its ideology relevance.",
+                        new ArrayList<>(),
                         "Reference answer pending provider recovery.",
                         List.of("Concept accuracy", "Ideology relevance", "Teaching expression"))));
         return fallback;
@@ -1359,10 +1706,13 @@ public class AiIntelligenceService {
             emptyResult.setInferred(true);
             emptyResult.setWarnings(new ArrayList<>(List.of("Pipeline result is empty.")));
             if (parsedContent != null && !parsedContent.isBlank()) {
+                // 兼容两种写法：旧任务是 DocumentStructureDto JSON；新任务是 MinerU markdown 原文。
                 try {
                     emptyResult.setDocumentStructure(objectMapper.readValue(parsedContent, DocumentStructureDto.class));
-                } catch (Exception ex) {
-                    emptyResult.getWarnings().add("Parsed content exists but failed to deserialize.");
+                } catch (Exception ignore) {
+                    DocumentStructureDto ds = new DocumentStructureDto();
+                    ds.setRawMarkdown(parsedContent);
+                    emptyResult.setDocumentStructure(ds);
                 }
             }
             return emptyResult;
@@ -1383,12 +1733,117 @@ public class AiIntelligenceService {
                 result.setIdeologyMatches(new ArrayList<>());
             }
             if (result.getDocumentStructure() == null && parsedContent != null && !parsedContent.isBlank()) {
-                result.setDocumentStructure(objectMapper.readValue(parsedContent, DocumentStructureDto.class));
+                // 老任务 parsedContent 可能是结构化 JSON；MinerU 接入后通常是 markdown。
+                // 非结构化时忽略即可，前端仍能从 aiAnalysis 其他字段取数据。
+                try {
+                    result.setDocumentStructure(objectMapper.readValue(parsedContent, DocumentStructureDto.class));
+                } catch (Exception ignore) {
+                    // parsedContent is not a JSON structure (likely markdown); skip silently.
+                }
             }
             return result;
         } catch (Exception ex) {
             throw new RuntimeException("Pipeline result JSON is invalid", ex);
         }
+    }
+
+    /**
+     * 面向 LLM 的结构摘要：剔除 rawMarkdown 与巨量 mineruContent.blocks，保留标题、类型、概要、
+     * 章节大纲以及 MinerU 的统计 / 大纲 / 表格-图片-公式的摘要信息。
+     *
+     * <p>
+     * 目的是既让 LLM 看到章节-页码-表格-图片结构，又不把完整 markdown / bbox / 全量 block 塞进提示词。
+     */
+    private String writeStructureForPrompt(DocumentStructureDto structure) {
+        if (structure == null) {
+            return "{}";
+        }
+        Map<String, Object> summary = new HashMap<>();
+        summary.put("title", structure.getTitle());
+        summary.put("documentType", structure.getDocumentType());
+        summary.put("overview", structure.getOverview());
+        summary.put("chapterOutline", structure.getChapterOutline());
+        summary.put("teachingFocus", structure.getTeachingFocus());
+        summary.put("parseMode", structure.getParseMode());
+
+        com.smartedu.dto.mineru.MineruStructuredContentDto mc = structure.getMineruContent();
+        if (mc != null) {
+            Map<String, Object> mineru = new HashMap<>();
+            if (mc.getStats() != null) {
+                mineru.put("stats", mc.getStats());
+            }
+            if (mc.getOutline() != null && !mc.getOutline().isEmpty()) {
+                mineru.put("outline", mc.getOutline());
+            }
+            // 表格/图片/公式各取前 8 条的 caption + 位置，给 LLM 足够上下文又不爆长度。
+            if (mc.getTables() != null && !mc.getTables().isEmpty()) {
+                mineru.put("tableSamples", summarizeBlocks(mc.getTables(), 8, true));
+            }
+            if (mc.getImages() != null && !mc.getImages().isEmpty()) {
+                mineru.put("imageSamples", summarizeBlocks(mc.getImages(), 8, false));
+            }
+            if (mc.getEquations() != null && !mc.getEquations().isEmpty()) {
+                mineru.put("equationSamples", summarizeBlocks(mc.getEquations(), 6, false));
+            }
+            summary.put("mineru", mineru);
+        }
+        return writeJsonSafely(summary);
+    }
+
+    /**
+     * 把 block 列表缩成 LLM 友好的轻量概要：类型、页码、caption 或 latex 文本。
+     */
+    private List<Map<String, Object>> summarizeBlocks(
+            List<com.smartedu.dto.mineru.MineruContentBlockDto> blocks,
+            int maxItems,
+            boolean includeTableSnippet) {
+        List<Map<String, Object>> list = new ArrayList<>();
+        int limit = Math.min(maxItems, blocks.size());
+        for (int i = 0; i < limit; i++) {
+            com.smartedu.dto.mineru.MineruContentBlockDto b = blocks.get(i);
+            Map<String, Object> item = new HashMap<>();
+            item.put("index", b.getIndex());
+            item.put("type", b.getType());
+            if (b.getPageIdx() != null)
+                item.put("pageIdx", b.getPageIdx());
+            if (b.getTableCaption() != null)
+                item.put("caption", String.join(" ", b.getTableCaption()));
+            else if (b.getImageCaption() != null)
+                item.put("caption", String.join(" ", b.getImageCaption()));
+            if (b.getText() != null && !b.getText().isBlank()) {
+                item.put("text", trimToLength(b.getText(), 200));
+            }
+            if (includeTableSnippet && b.getTableBody() != null) {
+                item.put("tableSnippet", trimToLength(b.getTableBody(), 400));
+            }
+            list.add(item);
+        }
+        return list;
+    }
+
+    /**
+     * 由 MinerU 大纲树收集一条扁平的章节字符串序列，用于回填 DocumentStructureDto.chapterOutline。
+     * 仅取一级 / 二级标题，避免列表过长。
+     */
+    private List<String> collectOutlineTitles(com.smartedu.dto.mineru.MineruStructuredContentDto mc) {
+        List<String> titles = new ArrayList<>();
+        if (mc == null || mc.getOutline() == null)
+            return titles;
+        for (com.smartedu.dto.mineru.MineruOutlineNodeDto n : mc.getOutline()) {
+            if (n.getTitle() != null && !n.getTitle().isBlank()) {
+                titles.add(n.getTitle().trim());
+            }
+            if (n.getChildren() != null) {
+                for (com.smartedu.dto.mineru.MineruOutlineNodeDto c : n.getChildren()) {
+                    if (c.getTitle() != null && !c.getTitle().isBlank()) {
+                        titles.add("  " + c.getTitle().trim());
+                    }
+                }
+            }
+            if (titles.size() >= 30)
+                break;
+        }
+        return titles;
     }
 
     private String writeJsonSafely(Object value) {
@@ -1418,12 +1873,21 @@ public class AiIntelligenceService {
             return "";
         }
         try {
-            List<KnowledgeNodeView> nodes = courseService.getCourseKnowledgePoints(courseId);
-            if (nodes == null || nodes.isEmpty()) {
-                return "No course knowledge points found.";
-            }
             StringBuilder context = new StringBuilder();
             context.append("courseId=").append(courseId).append('\n');
+
+            List<KnowledgeNodeView> nodes = courseService == null
+                    ? new ArrayList<>()
+                    : courseService.getCourseKnowledgePoints(courseId);
+            if (nodes == null) {
+                nodes = new ArrayList<>();
+            }
+
+            if (nodes.isEmpty()) {
+                context.append("No course knowledge points found.\n");
+                return context.toString();
+            }
+
             int count = 0;
             for (KnowledgeNodeView node : nodes) {
                 if (count >= 12) {
@@ -1438,11 +1902,74 @@ public class AiIntelligenceService {
                         .append('\n');
                 count++;
             }
+            appendResourceContext(context, nodes);
             return context.toString();
         } catch (Exception ex) {
             log.warn("Failed to build course context, fallback to empty context: courseId={}", courseId, ex);
             return "";
         }
+    }
+
+    private void appendResourceContext(StringBuilder context, List<KnowledgeNodeView> nodes) {
+        if (resourceService == null || nodes == null || nodes.isEmpty()) {
+            return;
+        }
+        String keyword = buildResourceSearchKeyword(nodes);
+        if (keyword.isBlank()) {
+            return;
+        }
+        List<Resource> resources = resourceService.searchForChatContext(keyword, 3);
+        if (resources == null || resources.isEmpty()) {
+            return;
+        }
+
+        context.append("Related resource excerpts:\n");
+        int index = 1;
+        for (Resource resource : resources) {
+            if (resource == null) {
+                continue;
+            }
+            String refId = "R" + index;
+            context.append("- [").append(refId).append("] id=")
+                    .append(resource.getId() == null ? "" : resource.getId())
+                    .append(" | title: ")
+                    .append(trimToLength(resource.getTitle(), 160))
+                    .append(" | source: ")
+                    .append(trimToLength(resource.getSource(), 120))
+                    .append(" | url: ")
+                    .append(trimToLength(resource.getSourceUrl(), 240))
+                    .append('\n');
+            context.append("  excerpt: ")
+                    .append(trimToLength(firstNonBlank(resource.getContent(), resource.getIdeologySummary()), 220))
+                    .append('\n');
+            context.append("  ideologySummary: ")
+                    .append(trimToLength(resource.getIdeologySummary(), 180))
+                    .append('\n');
+            index++;
+        }
+    }
+
+    private String buildResourceSearchKeyword(List<KnowledgeNodeView> nodes) {
+        StringBuilder keyword = new StringBuilder();
+        int count = 0;
+        for (KnowledgeNodeView node : nodes) {
+            if (node == null) {
+                continue;
+            }
+            String name = safe(node.getName());
+            if (name.isBlank()) {
+                continue;
+            }
+            if (keyword.length() > 0) {
+                keyword.append(' ');
+            }
+            keyword.append(name);
+            count++;
+            if (count >= 5) {
+                break;
+            }
+        }
+        return keyword.toString();
     }
 
     private String safeCourseContext(String courseContext) {
@@ -1465,6 +1992,150 @@ public class AiIntelligenceService {
         return filePath;
     }
 
+    /**
+     * Phase 0: unified failure recorder. Keeps a short summary in the DB (bounded
+     * to fit {@code parse_tasks.error_message}) and leaves full stack / warnings
+     * to the application log so the column is never at risk of truncation.
+     */
+    private void recordTaskFailure(ParseTask task, Throwable cause, List<String> warnings, String step) {
+        if (task == null) {
+            return;
+        }
+        String summary;
+        if (cause != null && cause.getMessage() != null && !cause.getMessage().isBlank()) {
+            summary = cause.getMessage();
+        } else if (warnings != null && !warnings.isEmpty()) {
+            summary = String.join(" | ", warnings);
+        } else {
+            summary = "Unknown pipeline failure";
+        }
+        task.setStatus("FAILED");
+        task.setErrorMessage(trimToLength(summary, 480));
+        if (step != null && !step.isBlank()) {
+            task.setCurrentStep(trimToLength(step, 200));
+        }
+        task.setUpdatedAt(LocalDateTime.now());
+        try {
+            parseTaskMapper.updateById(task);
+        } catch (Exception persistEx) {
+            log.error("Failed to persist FAILED status for taskId={}", task.getId(), persistEx);
+        }
+        log.error("Parse task failed taskId={} step={} warnings={}", task.getId(), step, warnings, cause);
+    }
+
+    /**
+     * Phase 2: delete existing projection rows for a parse task before
+     * re-insertion.
+     */
+    private void deleteProjectionsByTaskId(Long taskId) {
+        if (taskId == null) {
+            return;
+        }
+        try {
+            com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<ParseTaskKnowledgePoint> kpWrapper = new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<>();
+            kpWrapper.eq(ParseTaskKnowledgePoint::getParseTaskId, taskId);
+            parseTaskKnowledgePointMapper.delete(kpWrapper);
+
+            com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<ParseTaskIdeologyMatch> imWrapper = new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<>();
+            imWrapper.eq(ParseTaskIdeologyMatch::getParseTaskId, taskId);
+            parseTaskIdeologyMatchMapper.delete(imWrapper);
+        } catch (Exception ex) {
+            log.warn("Failed to delete old projections for taskId={}", taskId, ex);
+        }
+    }
+
+    /**
+     * Phase 2: persist pipeline result knowledge points and ideology matches into
+     * projection tables.
+     * Errors are logged but do not fail the main pipeline.
+     */
+    private void persistPipelineProjections(ParseTask task, PipelineResultDto result) {
+        if (task == null || task.getId() == null || result == null) {
+            return;
+        }
+        Long taskId = task.getId();
+        Long courseId = task.getCourseId();
+        String version = schemaVersion;
+        try {
+            deleteProjectionsByTaskId(taskId);
+
+            if (result.getKnowledgePoints() != null) {
+                for (KnowledgePointDto dto : result.getKnowledgePoints()) {
+                    ParseTaskKnowledgePoint point = new ParseTaskKnowledgePoint();
+                    point.setParseTaskId(taskId);
+                    point.setCourseId(courseId);
+                    point.setPointName(dto.getPointName());
+                    point.setDefinition(dto.getDefinition());
+                    point.setChapter(dto.getChapter());
+                    point.setEvidenceSnippet(dto.getEvidenceSnippet());
+                    point.setResourceCitationsJson(writeJsonSafely(dto.getResourceCitations()));
+                    point.setPipelineVersion(version);
+                    parseTaskKnowledgePointMapper.insert(point);
+                }
+            }
+
+            if (result.getIdeologyMatches() != null) {
+                for (IdeologyMatchDto dto : result.getIdeologyMatches()) {
+                    ParseTaskIdeologyMatch match = new ParseTaskIdeologyMatch();
+                    match.setParseTaskId(taskId);
+                    match.setKnowledgePointName(dto.getKnowledgePointName());
+                    match.setIdeologyElement(dto.getIdeologyElement());
+                    match.setMatchReason(dto.getMatchReason());
+                    match.setCitationExplanation(dto.getCitationExplanation());
+                    match.setResourceCitationsJson(writeJsonSafely(dto.getResourceCitations()));
+                    match.setPipelineVersion(version);
+                    parseTaskIdeologyMatchMapper.insert(match);
+                }
+            }
+
+            log.info("Projection persisted for taskId={} knowledgePoints={} ideologyMatches={}",
+                    taskId,
+                    result.getKnowledgePoints() == null ? 0 : result.getKnowledgePoints().size(),
+                    result.getIdeologyMatches() == null ? 0 : result.getIdeologyMatches().size());
+        } catch (Exception ex) {
+            log.error("Failed to persist projections for taskId={}", taskId, ex);
+        }
+    }
+
+    private List<ResourceCitationDto> sanitizeResourceCitations(JsonNode citationsNode) {
+        List<ResourceCitationDto> citations = new ArrayList<>();
+        if (citationsNode == null || !citationsNode.isArray()) {
+            return citations;
+        }
+        int count = 0;
+        for (JsonNode citationNode : citationsNode) {
+            if (citationNode == null || !citationNode.isObject()) {
+                continue;
+            }
+            pipelineJsonValidator.parseObject(
+                    citationNode.toString(),
+                    List.of("resourceRefId", "resourceId", "title", "source", "sourceUrl", "quotedExcerpt",
+                            "citationReason"),
+                    List.of("resourceRefId", "resourceId", "title", "source", "sourceUrl", "quotedExcerpt",
+                            "citationReason"));
+            ResourceCitationDto dto = objectMapper.convertValue(citationNode, ResourceCitationDto.class);
+            dto.setResourceRefId(trimToLength(dto.getResourceRefId(), 20));
+            dto.setTitle(trimToLength(dto.getTitle(), 200));
+            dto.setSource(trimToLength(dto.getSource(), 120));
+            dto.setSourceUrl(trimToLength(dto.getSourceUrl(), 500));
+            dto.setQuotedExcerpt(trimToLength(dto.getQuotedExcerpt(), 300));
+            dto.setCitationReason(trimToLength(dto.getCitationReason(), 300));
+            citations.add(dto);
+            count++;
+            if (count >= 3) {
+                break;
+            }
+        }
+        return citations;
+    }
+
+    private String firstNonBlank(String first, String second) {
+        if (first != null && !first.isBlank()) {
+            return first.trim();
+        }
+        return safe(second);
+    }
+
     private String trimToLength(String value, int maxLength) {
         if (value == null) {
             return "";
@@ -1476,6 +2147,10 @@ public class AiIntelligenceService {
         return trimmed.substring(0, maxLength);
     }
 
+    private String safe(String value) {
+        return value == null ? "" : value.trim();
+    }
+
     private String safeText(JsonNode node) {
         if (node == null || !node.isTextual()) {
             return "";
@@ -1484,27 +2159,70 @@ public class AiIntelligenceService {
     }
 
     /**
-     * 尽量读取文本内容，失败时允许回退到文件名推断。
+     * 通过 {@link DocumentTextExtractor} 按扩展名真实抽取文本（PDF/Office），
+     * 其余格式走纯文本读。失败时返回 null，上层允许回退到文件名推断。
      */
     private String readFileContent(String filePath) {
-        java.io.File file = new java.io.File(filePath);
-        if (!file.exists() || !file.isFile()) {
-            log.warn("File path is invalid: {}", filePath);
+        return documentTextExtractor.extract(filePath);
+    }
+
+    /**
+     * 调用 MinerU 解析本地文件；未配置或失败时返回 null，让上层静默降级。
+     *
+     * <p>
+     * 这里刻意不把 MinerU 异常向上抛，因为降级到 {@link DocumentTextExtractor} 足以保障基础能力；
+     * 失败原因写入 warnings 用于运维排查与前端 trace 展示。
+     */
+    private MineruParseClient.MineruParseResult tryMineruParse(
+            ParseTask task, String fileName, List<String> warnings) {
+        if (!mineruParseClient.isAvailable()) {
+            warnings.add("MinerU disabled or not configured; using local extractor.");
             return null;
         }
-
         try {
-            return java.nio.file.Files.readString(
-                    java.nio.file.Path.of(filePath),
-                    java.nio.charset.StandardCharsets.UTF_8);
-        } catch (Exception utf8Ex) {
-            try {
-                byte[] bytes = java.nio.file.Files.readAllBytes(java.nio.file.Path.of(filePath));
-                return new String(bytes, java.nio.charset.Charset.forName("GBK"));
-            } catch (Exception gbkEx) {
-                log.warn("Failed to read file content, fallback to filename inference: {}", filePath);
-                return null;
-            }
+            return mineruParseClient.parseLocalFile(task.getFilePath(), fileName);
+        } catch (RuntimeException ex) {
+            log.warn("MinerU parse failed for taskId={}, fallback to extractor: {}", task.getId(), ex.getMessage());
+            warnings.add("MinerU parse failed: " + ex.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * regenerate 场景下从已有 aiAnalysis JSON 里还原 DocumentStructureDto；拿不到时返回 null。
+     */
+    private DocumentStructureDto loadExistingStructure(ParseTask task) {
+        String aiAnalysis = task.getAiAnalysis();
+        if (aiAnalysis == null || aiAnalysis.isBlank()) {
+            return null;
+        }
+        try {
+            PipelineResultDto prev = objectMapper.readValue(aiAnalysis, PipelineResultDto.class);
+            return prev.getDocumentStructure();
+        } catch (Exception ex) {
+            log.debug("Failed to reuse structure from aiAnalysis for taskId={}", task.getId());
+            return null;
+        }
+    }
+
+    /**
+     * 尽力从已有任务中拿到 markdown 原文，优先取 structure.rawMarkdown，退化到 parsedContent。
+     */
+    private String extractExistingRawMarkdown(ParseTask task) {
+        DocumentStructureDto existing = loadExistingStructure(task);
+        if (existing != null && existing.getRawMarkdown() != null && !existing.getRawMarkdown().isBlank()) {
+            return existing.getRawMarkdown();
+        }
+        String parsed = task.getParsedContent();
+        if (parsed == null || parsed.isBlank()) {
+            return null;
+        }
+        // 旧任务 parsedContent 可能是 JSON；不是 JSON 就直接当 markdown 返回。
+        try {
+            objectMapper.readTree(parsed);
+            return null;
+        } catch (Exception ex) {
+            return parsed;
         }
     }
 

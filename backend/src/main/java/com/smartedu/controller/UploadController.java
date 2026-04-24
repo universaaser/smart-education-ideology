@@ -2,8 +2,10 @@ package com.smartedu.controller;
 
 import com.smartedu.common.Result;
 import com.smartedu.common.PageResult;
-import com.smartedu.dto.PipelineResultDto;
 import com.smartedu.dto.MaterialVersionItemDto;
+import com.smartedu.dto.ParseTaskCorrectionDraftDto;
+import com.smartedu.dto.ParseTaskListItemDto;
+import com.smartedu.dto.PipelineResultDto;
 import com.smartedu.dto.TeachingMaterialDraftDto;
 import com.smartedu.dto.TeachingMaterialSaveRequestDto;
 import com.smartedu.dto.TeachingMaterialTraceDto;
@@ -11,13 +13,19 @@ import com.smartedu.dto.TeachingMaterialViewDto;
 import com.smartedu.entity.ParseTask;
 import com.smartedu.mapper.ParseTaskMapper;
 import com.smartedu.service.AiIntelligenceService;
+import com.smartedu.service.AiStreamBuffer;
+import com.smartedu.service.ParseTaskCorrectionService;
 import com.smartedu.service.TeachingMaterialService;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -46,6 +54,9 @@ public class UploadController {
     private final ParseTaskMapper parseTaskMapper;
     private final AiIntelligenceService aiIntelligenceService;
     private final TeachingMaterialService teachingMaterialService;
+    private final ParseTaskCorrectionService parseTaskCorrectionService;
+    private final AiStreamBuffer aiStreamBuffer;
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Value("${storage.upload-path}")
     private String uploadPath;
@@ -89,7 +100,8 @@ public class UploadController {
 
         try {
             // 2. 创建存储目录
-            Path uploadDir = Paths.get(uploadPath);
+            // 转绝对路径，避免 MultipartFile.transferTo 把相对路径解析到 Tomcat work 目录
+            Path uploadDir = Paths.get(uploadPath).toAbsolutePath().normalize();
             if (!Files.exists(uploadDir)) {
                 Files.createDirectories(uploadDir);
             }
@@ -231,6 +243,80 @@ public class UploadController {
     }
 
     /**
+     * Load the current correction draft for one completed parse task.
+     */
+    @GetMapping("/tasks/{taskId}/correction-draft")
+    public Result<ParseTaskCorrectionDraftDto> getCorrectionDraft(@PathVariable Long taskId) {
+        ParseTask task = parseTaskMapper.selectById(taskId);
+        if (task == null) {
+            return Result.notFound("Task not found");
+        }
+        try {
+            ParseTaskCorrectionDraftDto draft = parseTaskCorrectionService.getCorrectionDraft(taskId);
+            return Result.success(draft);
+        } catch (RuntimeException ex) {
+            return Result.badRequest(ex.getMessage());
+        }
+    }
+
+    /**
+     * Save the latest manual correction snapshot for one completed parse task.
+     */
+    @PutMapping("/tasks/{taskId}/correction-draft")
+    public Result<ParseTaskCorrectionDraftDto> saveCorrectionDraft(
+            @PathVariable Long taskId,
+            @RequestBody PipelineResultDto request) {
+        ParseTask task = parseTaskMapper.selectById(taskId);
+        if (task == null) {
+            return Result.notFound("Task not found");
+        }
+        try {
+            ParseTaskCorrectionDraftDto draft = parseTaskCorrectionService.saveCorrectionDraft(taskId, request);
+            return Result.success("Correction draft saved", draft);
+        } catch (RuntimeException ex) {
+            return Result.badRequest(ex.getMessage());
+        }
+    }
+
+    /**
+     * Re-run the full parsing pipeline for a completed task.
+     */
+    @PostMapping("/tasks/{taskId}/reparse")
+    public Result<Map<String, Object>> reparseTask(@PathVariable Long taskId) {
+        ParseTask task = parseTaskMapper.selectById(taskId);
+        if (task == null) {
+            return Result.notFound("Task not found");
+        }
+        try {
+            parseTaskCorrectionService.markCorrectionStale(taskId);
+            ParseTask restarted = aiIntelligenceService.reparseTask(taskId);
+            aiIntelligenceService.processDocumentAsync(taskId);
+            return Result.success("Task reparsing started", buildTaskSummary(restarted));
+        } catch (RuntimeException ex) {
+            return Result.badRequest(ex.getMessage());
+        }
+    }
+
+    /**
+     * Retry a failed parsing task.
+     */
+    @PostMapping("/tasks/{taskId}/retry")
+    public Result<Map<String, Object>> retryTask(@PathVariable Long taskId) {
+        ParseTask task = parseTaskMapper.selectById(taskId);
+        if (task == null) {
+            return Result.notFound("Task not found");
+        }
+        try {
+            parseTaskCorrectionService.markCorrectionStale(taskId);
+            ParseTask restarted = aiIntelligenceService.retryTask(taskId);
+            aiIntelligenceService.processDocumentAsync(taskId);
+            return Result.success("Task retry started", buildTaskSummary(restarted));
+        } catch (RuntimeException ex) {
+            return Result.badRequest(ex.getMessage());
+        }
+    }
+
+    /**
      * 提交保存正式版本，自动升版本号。
      */
     @PostMapping("/tasks/{taskId}/materials")
@@ -294,6 +380,72 @@ public class UploadController {
     }
 
     /**
+     * 增量拉取解析任务的 LLM 实时输出。
+     *
+     * @param taskId 任务 id
+     * @param offset 上一次读到的游标；首次传 0
+     * @return content=游标之后的新内容；cursor=当前总长度；status=任务当前状态
+     */
+    @GetMapping("/tasks/{taskId}/live-log")
+    public Result<Map<String, Object>> getLiveLog(
+            @PathVariable Long taskId,
+            @RequestParam(required = false, defaultValue = "0") Integer offset) {
+        ParseTask task = parseTaskMapper.selectById(taskId);
+        if (task == null) {
+            return Result.notFound("Task not found");
+        }
+        AiStreamBuffer.LiveLogSlice slice = aiStreamBuffer.read(taskId, offset == null ? 0 : offset);
+        Map<String, Object> result = new HashMap<>();
+        result.put("content", slice.content());
+        result.put("cursor", slice.cursor());
+        result.put("status", task.getStatus());
+        result.put("currentStep", task.getCurrentStep());
+        return Result.success(result);
+    }
+
+    /**
+     * 历史解析任务列表，供前端"Parse History"面板使用。
+     * userId 可选：传入则只返回该用户任务，否则返回全部（按创建时间倒序）。
+     */
+    @GetMapping("/tasks")
+    public Result<PageResult<ParseTaskListItemDto>> listTasks(
+            @RequestParam(required = false) Long userId,
+            @RequestParam(defaultValue = "1") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        int safePage = Math.max(page, 1);
+        int safeSize = Math.min(Math.max(size, 1), 100);
+
+        LambdaQueryWrapper<ParseTask> wrapper = new LambdaQueryWrapper<>();
+        if (userId != null) {
+            wrapper.eq(ParseTask::getUserId, userId);
+        }
+        wrapper.orderByDesc(ParseTask::getCreatedAt);
+
+        Page<ParseTask> pageParam = new Page<>(safePage, safeSize);
+        Page<ParseTask> pageResult = parseTaskMapper.selectPage(pageParam, wrapper);
+
+        List<ParseTaskListItemDto> records = new java.util.ArrayList<>();
+        for (ParseTask task : pageResult.getRecords()) {
+            records.add(new ParseTaskListItemDto(
+                    task.getId(),
+                    task.getFileName(),
+                    task.getStatus(),
+                    task.getProgress(),
+                    task.getCurrentStep(),
+                    task.getCourseId(),
+                    extractParseMode(task),
+                    task.getCreatedAt(),
+                    task.getCompletedAt(),
+                    task.getErrorMessage()));
+        }
+        return Result.success(new PageResult<>(
+                records,
+                pageResult.getTotal(),
+                pageResult.getSize(),
+                pageResult.getCurrent()));
+    }
+
+    /**
      * 获取文件扩展名
      */
     private String getFileExtension(String filename) {
@@ -302,5 +454,33 @@ public class UploadController {
             return filename.substring(dotIndex + 1);
         }
         return "";
+    }
+
+    private Map<String, Object> buildTaskSummary(ParseTask task) {
+        Map<String, Object> result = new HashMap<>();
+        result.put("taskId", task.getId());
+        result.put("fileName", task.getFileName());
+        result.put("courseId", task.getCourseId());
+        result.put("status", task.getStatus());
+        result.put("progress", task.getProgress());
+        result.put("currentStep", task.getCurrentStep());
+        result.put("completedAt", task.getCompletedAt());
+        result.put("errorMessage", task.getErrorMessage());
+        return result;
+    }
+
+    private String extractParseMode(ParseTask task) {
+        String aiAnalysis = task.getAiAnalysis();
+        if (aiAnalysis == null || aiAnalysis.isBlank()) {
+            return null;
+        }
+        try {
+            JsonNode root = objectMapper.readTree(aiAnalysis);
+            JsonNode parseModeNode = root.path("documentStructure").path("parseMode");
+            return parseModeNode.isTextual() ? parseModeNode.asText() : null;
+        } catch (Exception ex) {
+            log.debug("Failed to extract parse mode for taskId={}", task.getId());
+            return null;
+        }
     }
 }

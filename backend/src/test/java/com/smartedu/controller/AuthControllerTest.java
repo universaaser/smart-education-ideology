@@ -54,6 +54,16 @@ class AuthControllerTest {
     }
 
     @Test
+    void shouldRejectLoginWithEmptyBody() throws Exception {
+        mockMvc.perform(post("/api/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(""))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(400))
+                .andExpect(jsonPath("$.message").value("Request body cannot be empty"));
+    }
+
+    @Test
     void shouldRegisterFromStructuredRequest() throws Exception {
         mockMvc.perform(post("/api/auth/register")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -68,6 +78,16 @@ class AuthControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(200))
                 .andExpect(jsonPath("$.data.user.username").value("student"));
+    }
+
+    @Test
+    void shouldRejectRegisterWithEmptyBody() throws Exception {
+        mockMvc.perform(post("/api/auth/register")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(""))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(400))
+                .andExpect(jsonPath("$.message").value("Request body cannot be empty"));
     }
 
     private static class StubAuthService extends AuthService {

@@ -4,6 +4,7 @@ E:\study\smart-education-ideology\backend\src\test\java\com\smartedu\controller\
 E:\study\smart-education-ideology\backend\src\test\java\com\smartedu\controller\KnowledgeControllerTest.java
 E:\study\smart-education-ideology\backend\src\test\java\com\smartedu\controller\PathRecommendControllerTest.java
 E:\study\smart-education-ideology\backend\src\test\java\com\smartedu\controller\ResourceControllerTest.java
+E:\study\smart-education-ideology\backend\src\test\java\com\smartedu\controller\SemanticSearchControllerTest.java
 E:\study\smart-education-ideology\backend\src\test\java\com\smartedu\controller\TeachingMaterialControllerTest.java
 E:\study\smart-education-ideology\backend\src\test\java\com\smartedu\controller\UploadControllerTest.java
 E:\study\smart-education-ideology\backend\src\test\java\com\smartedu\service\AiIntelligenceServiceTest.java
@@ -12,5 +13,9 @@ E:\study\smart-education-ideology\backend\src\test\java\com\smartedu\service\Cha
 E:\study\smart-education-ideology\backend\src\test\java\com\smartedu\service\KnowledgeChunkServiceTest.java
 E:\study\smart-education-ideology\backend\src\test\java\com\smartedu\service\KnowledgeIngestionServiceTest.java
 E:\study\smart-education-ideology\backend\src\test\java\com\smartedu\service\KnowledgeRetrievalServiceTest.java
+E:\study\smart-education-ideology\backend\src\test\java\com\smartedu\service\KnowledgeServiceTest.java
+E:\study\smart-education-ideology\backend\src\test\java\com\smartedu\service\ParseTaskCorrectionServiceTest.java
 E:\study\smart-education-ideology\backend\src\test\java\com\smartedu\service\ResourceCrawlServiceTest.java
 E:\study\smart-education-ideology\backend\src\test\java\com\smartedu\service\TeachingMaterialServiceTest.java
+E:\study\smart-education-ideology\backend\src\test\java\com\smartedu\service\VectorIndexAsyncServiceTest.java
+E:\study\smart-education-ideology\backend\src\test\java\com\smartedu\service\VectorIndexServiceTest.java

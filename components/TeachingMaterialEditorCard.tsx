@@ -1,5 +1,5 @@
 import React from 'react';
-import { Alert, Button, Card, Divider, Input, Space, Spin, Tag, Typography } from 'antd';
+import { Alert, Button, Card, Divider, Input, InputNumber, Select, Space, Spin, Tag, Tabs, Typography } from 'antd';
 import { DownloadOutlined, FileTextOutlined, RobotOutlined } from '@ant-design/icons';
 import {
   MaterialVersionItemInfo,
@@ -11,8 +11,9 @@ import {
   TeachingTraceItemInfo,
 } from '../services/api';
 import { SelectionExplainPanel } from './SelectionExplainPanel';
+import { TeachingMaterialPreview } from './TeachingMaterialPreview';
 
-const { Text, Paragraph } = Typography;
+const { Text } = Typography;
 const { TextArea } = Input;
 
 interface TeachingMaterialEditorCardProps {
@@ -52,8 +53,11 @@ interface TeachingMaterialEditorCardProps {
   onUpdateCase: (index: number, value: string) => void;
   onRemoveCase: (index: number) => void;
   onAddQuestion: () => void;
-  onUpdateQuestion: (index: number, field: keyof TeachingQuestionInfo, value: string | string[]) => void;
+  onUpdateQuestion: (index: number, field: keyof TeachingQuestionInfo, value: string | string[] | number | null) => void;
   onRemoveQuestion: (index: number) => void;
+  onUpdateQuestionOption: (questionIndex: number, optionIndex: number, value: string) => void;
+  onAddQuestionOption: (questionIndex: number) => void;
+  onRemoveQuestionOption: (questionIndex: number, optionIndex: number) => void;
   onUpdateScoringPoint: (questionIndex: number, pointIndex: number, value: string) => void;
   onAddScoringPoint: (questionIndex: number) => void;
   onRemoveScoringPoint: (questionIndex: number, pointIndex: number) => void;
@@ -102,6 +106,9 @@ export const TeachingMaterialEditorCard: React.FC<TeachingMaterialEditorCardProp
   onAddQuestion,
   onUpdateQuestion,
   onRemoveQuestion,
+  onUpdateQuestionOption,
+  onAddQuestionOption,
+  onRemoveQuestionOption,
   onUpdateScoringPoint,
   onAddScoringPoint,
   onRemoveScoringPoint,
@@ -200,14 +207,21 @@ export const TeachingMaterialEditorCard: React.FC<TeachingMaterialEditorCardProp
             <Alert type="warning" showIcon message={rollbackTip} />
           )}
 
-          <div>
-            <Text strong>Title</Text>
-            <Input
-              value={editorDraft.title}
-              onChange={(event) => onChangeTitle(event.target.value)}
-              maxLength={300}
-            />
-          </div>
+          <Tabs
+            items={[
+              {
+                key: 'edit',
+                label: 'Edit',
+                children: (
+                  <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+                    <div>
+                      <Text strong>Title</Text>
+                      <Input
+                        value={editorDraft.title}
+                        onChange={(event) => onChangeTitle(event.target.value)}
+                        maxLength={300}
+                      />
+                    </div>
 
           <div>
             <Space style={{ width: '100%', justifyContent: 'space-between', marginBottom: 6 }}>
@@ -284,12 +298,59 @@ export const TeachingMaterialEditorCard: React.FC<TeachingMaterialEditorCardProp
             {(editorDraft.questions || []).map((question, index) => (
               <Card key={`question-${index}`} size="small" style={{ borderRadius: 8 }}>
                 <Space direction="vertical" style={{ width: '100%' }}>
+                  <Space wrap>
+                    <Select
+                      style={{ width: 180 }}
+                      value={question.questionType || 'SHORT_ANSWER'}
+                      onChange={(value) => onUpdateQuestion(index, 'questionType', value)}
+                      options={[
+                        { value: 'SINGLE_CHOICE', label: 'Single Choice' },
+                        { value: 'MULTIPLE_CHOICE', label: 'Multiple Choice' },
+                        { value: 'SHORT_ANSWER', label: 'Short Answer' },
+                        { value: 'CASE_ANALYSIS', label: 'Case Analysis' },
+                      ]}
+                    />
+                    <Select
+                      style={{ width: 140 }}
+                      value={question.difficulty || 'MEDIUM'}
+                      onChange={(value) => onUpdateQuestion(index, 'difficulty', value)}
+                      options={[
+                        { value: 'EASY', label: 'Easy' },
+                        { value: 'MEDIUM', label: 'Medium' },
+                        { value: 'HARD', label: 'Hard' },
+                      ]}
+                    />
+                    <InputNumber
+                      placeholder="Knowledge point ID"
+                      min={1}
+                      value={question.knowledgePointId ?? null}
+                      onChange={(value) => onUpdateQuestion(index, 'knowledgePointId', value)}
+                    />
+                  </Space>
                   <Input
                     placeholder="Question stem"
                     value={question.stem}
                     onChange={(event) => onUpdateQuestion(index, 'stem', event.target.value)}
                     maxLength={2000}
                   />
+                  <Space direction="vertical" style={{ width: '100%' }}>
+                    <Text type="secondary">Options</Text>
+                    {(question.options || []).map((option, optionIndex) => (
+                      <Space key={`question-${index}-option-${optionIndex}`} style={{ width: '100%' }}>
+                        <Input
+                          value={option}
+                          onChange={(event) => onUpdateQuestionOption(index, optionIndex, event.target.value)}
+                          maxLength={1000}
+                        />
+                        <Button danger onClick={() => onRemoveQuestionOption(index, optionIndex)}>
+                          Remove
+                        </Button>
+                      </Space>
+                    ))}
+                    <Button size="small" onClick={() => onAddQuestionOption(index)}>
+                      Add Option
+                    </Button>
+                  </Space>
                   <TextArea
                     placeholder="Reference answer"
                     value={question.referenceAnswer}
@@ -383,7 +444,17 @@ export const TeachingMaterialEditorCard: React.FC<TeachingMaterialEditorCardProp
             {traceRows.length === 0 && (editorDraft.traceItems || []).length === 0 && (
               <Text type="secondary">No trace records.</Text>
             )}
-          </Space>
+                  </Space>
+                  </Space>
+                ),
+              },
+              {
+                key: 'preview',
+                label: 'Preview',
+                children: <TeachingMaterialPreview material={editorDraft} />,
+              },
+            ]}
+          />
         </Space>
       )}
     </Card>

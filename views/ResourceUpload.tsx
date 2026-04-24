@@ -4,11 +4,13 @@ import {
   Avatar,
   Button,
   Card,
+  List,
   message,
-  Progress,
+  notification,
   Select,
   Space,
   Spin,
+  Tag,
   Typography,
   Upload,
 } from 'antd';
@@ -32,6 +34,9 @@ import {
   dashboardApi,
   MaterialVersionItemInfo,
   materialApi,
+  ParseTaskCorrectionDraftInfo,
+  ParseTaskListItem,
+  PipelineResultInfo,
   SelectionExplainHistoryInfo,
   SelectionExplainResponse,
   TeachingMaterialDraftInfo,
@@ -42,7 +47,10 @@ import {
   UploadTaskInfo,
   uploadApi,
 } from '../services/api';
+import { ParseResultCorrectionCard } from '../components/ParseResultCorrectionCard';
 import { TeachingMaterialEditorCard } from '../components/TeachingMaterialEditorCard';
+import { MarkdownView } from '../components/MarkdownView';
+import { MineruStructuredView } from '../components/MineruStructuredView';
 import { downloadBlobFile } from '../services/download';
 import { ResourceUploadTarget } from '../types';
 
@@ -90,8 +98,26 @@ export const ResourceUpload: React.FC<ResourceUploadProps> = ({
   const [selectionHistoryLoading, setSelectionHistoryLoading] = useState(false);
   const [selectedLectureText, setSelectedLectureText] = useState('');
   const [openContextWarning, setOpenContextWarning] = useState('');
+  const [correctionDraft, setCorrectionDraft] = useState<ParseTaskCorrectionDraftInfo | null>(null);
+  const [correctionLoading, setCorrectionLoading] = useState(false);
+  const [savingCorrection, setSavingCorrection] = useState(false);
+  const [reparsingTask, setReparsingTask] = useState(false);
+  const [retryingTask, setRetryingTask] = useState(false);
+  const [correctionSyncNotice, setCorrectionSyncNotice] = useState('');
+  // 实时 LLM 输出日志：取代原进度条展示
+  const [liveLog, setLiveLog] = useState('');
+  // 历史解析记录
+  const [historyTasks, setHistoryTasks] = useState<ParseTaskListItem[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
   const pollTimerRef = useRef<number | null>(null);
+  const liveLogTimerRef = useRef<number | null>(null);
+  const liveLogBoxRef = useRef<HTMLPreElement | null>(null);
+  // 用 ref 保存 cursor：轮询闭包里需要读到最新值，state 异步更新不可靠。
+  const liveLogCursorRef = useRef(0);
   const isUnmountedRef = useRef(false);
+  // 历史列表并发/节流守卫：避免上游任何误触发导致的重复请求刷爆后端日志。
+  const historyInFlightRef = useRef(false);
+  const historyLastLoadAtRef = useRef(0);
   const openedExternalTargetKeyRef = useRef('');
   const dismissedExternalTargetKeyRef = useRef('');
   const resourceUploadTargetKey = resourceUploadTarget
@@ -100,6 +126,10 @@ export const ResourceUpload: React.FC<ResourceUploadProps> = ({
   const hasActiveUser = userId !== undefined && userId !== null;
 
   useEffect(() => {
+    // StrictMode dev 下首次会经历 mount -> unmount -> remount：
+    // 若只在 cleanup 把 isUnmountedRef 置 true，第二次 mount 后仍残留 true，
+    // 会导致之后所有 setState 被静默丢弃。这里在 mount 时显式重置。
+    isUnmountedRef.current = false;
     return () => {
       /**
        * 页面卸载时必须清理轮询，避免任务轮询在视图切走后继续回写状态。
@@ -108,6 +138,10 @@ export const ResourceUpload: React.FC<ResourceUploadProps> = ({
       if (pollTimerRef.current !== null) {
         window.clearTimeout(pollTimerRef.current);
         pollTimerRef.current = null;
+      }
+      if (liveLogTimerRef.current !== null) {
+        window.clearTimeout(liveLogTimerRef.current);
+        liveLogTimerRef.current = null;
       }
     };
   }, []);
@@ -134,6 +168,54 @@ export const ResourceUpload: React.FC<ResourceUploadProps> = ({
     loadCourses();
   }, []);
 
+  const loadHistoryTasks = async () => {
+    // 守卫 1：已有请求在途时直接忽略，避免重入。
+    if (historyInFlightRef.current) {
+      return;
+    }
+    // 守卫 2：1 秒内的重复触发直接忽略。防止上游任何异常的 re-render/StrictMode/父级轮询
+    // 把 effect 反复驱动，避免 parse_tasks 查询在后端日志里被刷屏。
+    const now = Date.now();
+    if (now - historyLastLoadAtRef.current < 1000) {
+      return;
+    }
+    historyInFlightRef.current = true;
+    historyLastLoadAtRef.current = now;
+    setHistoryLoading(true);
+    try {
+      const response = await uploadApi.listTasks({ userId, page: 1, size: 20 });
+      if (!isUnmountedRef.current) {
+        setHistoryTasks(response.records || []);
+      }
+    } catch {
+      if (!isUnmountedRef.current) {
+        message.error('Failed to load parse history');
+      }
+    } finally {
+      historyInFlightRef.current = false;
+      historyLastLoadAtRef.current = Date.now();
+      if (!isUnmountedRef.current) {
+        setHistoryLoading(false);
+      }
+    }
+  };
+
+  useEffect(() => {
+    loadHistoryTasks();
+    // userId 变化时需要重新加载自己的任务列表
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userId]);
+
+  /**
+   * 页面底部自动滚动：每次 liveLog 增量写入后把日志框滚到底部。
+   */
+  useEffect(() => {
+    const box = liveLogBoxRef.current;
+    if (box) {
+      box.scrollTop = box.scrollHeight;
+    }
+  }, [liveLog]);
+
   const buildDraftFromMaterial = (material: TeachingMaterialViewInfo): TeachingMaterialDraftInfo => ({
     materialId: material.materialId,
     parseTaskId: material.parseTaskId,
@@ -148,6 +230,34 @@ export const ResourceUpload: React.FC<ResourceUploadProps> = ({
     versionNo: material.versionNo || 0,
     status: material.status || 'DRAFT',
     updatedAt: material.updatedAt,
+  });
+
+  const normalizePipelineResult = (result?: PipelineResultInfo | null): PipelineResultInfo => ({
+    documentStructure: {
+      title: result?.documentStructure?.title || '',
+      documentType: result?.documentStructure?.documentType || 'UNKNOWN',
+      overview: result?.documentStructure?.overview || '',
+      chapterOutline: result?.documentStructure?.chapterOutline || [],
+      teachingFocus: result?.documentStructure?.teachingFocus || [],
+      rawMarkdown: result?.documentStructure?.rawMarkdown,
+      parseMode: result?.documentStructure?.parseMode,
+      mineruContent: result?.documentStructure?.mineruContent,
+    },
+    knowledgePoints: result?.knowledgePoints || [],
+    ideologyMatches: result?.ideologyMatches || [],
+    teachingArtifacts: {
+      lectureNotes: result?.teachingArtifacts?.lectureNotes || '',
+      cases: result?.teachingArtifacts?.cases || [],
+      questions: result?.teachingArtifacts?.questions || [],
+    },
+    warnings: result?.warnings || [],
+    inferred: result?.inferred || false,
+    schemaVersion: result?.schemaVersion || 'v1',
+  });
+
+  const buildCorrectionDraft = (draft: ParseTaskCorrectionDraftInfo): ParseTaskCorrectionDraftInfo => ({
+    ...draft,
+    result: normalizePipelineResult(draft.result),
   });
 
   const resetTransientPanels = () => {
@@ -170,6 +280,10 @@ export const ResourceUpload: React.FC<ResourceUploadProps> = ({
       window.clearTimeout(pollTimerRef.current);
       pollTimerRef.current = null;
     }
+    if (liveLogTimerRef.current !== null) {
+      window.clearTimeout(liveLogTimerRef.current);
+      liveLogTimerRef.current = null;
+    }
     setFile(null);
     setStatus('idle');
     setProgress(0);
@@ -179,15 +293,49 @@ export const ResourceUpload: React.FC<ResourceUploadProps> = ({
     setEditorDraft(null);
     setEditorLoading(false);
     setSavingDraft(false);
+    setSavingCorrection(false);
     setPublishingVersion(false);
     setMaterialVersions([]);
     setVersionsLoading(false);
     setExportingMarkdown(false);
+    setCorrectionDraft(null);
+    setCorrectionLoading(false);
+    setReparsingTask(false);
+    setRetryingTask(false);
+    setCorrectionSyncNotice('');
     setSelectedCourseId(undefined);
+    setLiveLog('');
+    liveLogCursorRef.current = 0;
     resetTransientPanels();
     if (!options?.preserveWarning) {
       setOpenContextWarning('');
     }
+  };
+
+  /**
+   * 定时拉取 LLM 实时输出。任务进入终态（COMPLETED/FAILED）后自动停止。
+   */
+  const pollLiveLog = (taskId: number) => {
+    const loop = async () => {
+      try {
+        const slice = await uploadApi.getLiveLog(taskId, liveLogCursorRef.current);
+        if (isUnmountedRef.current) {
+          return;
+        }
+        if (slice.content) {
+          setLiveLog((prev) => prev + slice.content);
+          liveLogCursorRef.current = slice.cursor;
+        }
+        // 后端已进入终态就不再继续轮询；UI 后续由 pollTaskStatus 接管收尾。
+        if (slice.status === 'COMPLETED' || slice.status === 'FAILED') {
+          return;
+        }
+      } catch {
+        // 网络抖动时静默继续，避免日志轮询本身把前端打挂
+      }
+      liveLogTimerRef.current = window.setTimeout(loop, 800);
+    };
+    loop();
   };
 
   const loadMaterialVersions = async (taskId: number): Promise<MaterialVersionItemInfo[]> => {
@@ -207,6 +355,25 @@ export const ResourceUpload: React.FC<ResourceUploadProps> = ({
     } finally {
       if (!isUnmountedRef.current) {
         setVersionsLoading(false);
+      }
+    }
+  };
+
+  const loadCorrectionDraft = async (taskId: number) => {
+    setCorrectionLoading(true);
+    try {
+      const draft = await uploadApi.getCorrectionDraft(taskId);
+      if (!isUnmountedRef.current) {
+        setCorrectionDraft(buildCorrectionDraft(draft));
+      }
+    } catch (err: unknown) {
+      if (!isUnmountedRef.current) {
+        setCorrectionDraft(null);
+        message.error(err instanceof Error ? err.message : 'Failed to load correction draft');
+      }
+    } finally {
+      if (!isUnmountedRef.current) {
+        setCorrectionLoading(false);
       }
     }
   };
@@ -332,6 +499,7 @@ export const ResourceUpload: React.FC<ResourceUploadProps> = ({
       setSelectionExplainResult(null);
       setSelectedLectureText('');
       setRollbackTip('');
+      setCorrectionSyncNotice('');
       setTraceRows([]);
       setTraceTotal(0);
       setEditorDraft(draft);
@@ -348,6 +516,7 @@ export const ResourceUpload: React.FC<ResourceUploadProps> = ({
       } else {
         await refreshEditorPanels(taskInfo.taskId, draft.materialId, draft.courseId);
       }
+      await loadCorrectionDraft(taskInfo.taskId);
 
       if (!isUnmountedRef.current) {
         setEditorDraft(activeDraft);
@@ -417,6 +586,48 @@ export const ResourceUpload: React.FC<ResourceUploadProps> = ({
     };
   }, [resourceUploadTarget, resourceUploadTargetKey]);
 
+  const beginTaskProcessing = (
+    task: Pick<UploadTaskInfo, 'taskId' | 'fileName' | 'courseId' | 'status' | 'progress' | 'currentStep'>,
+    fallbackStep: string,
+  ) => {
+    if (pollTimerRef.current !== null) {
+      window.clearTimeout(pollTimerRef.current);
+      pollTimerRef.current = null;
+    }
+    if (liveLogTimerRef.current !== null) {
+      window.clearTimeout(liveLogTimerRef.current);
+      liveLogTimerRef.current = null;
+    }
+
+    setFile(null);
+    setStatus('parsing');
+    setProgress(task.progress ?? 10);
+    setCurrentStep(task.currentStep || fallbackStep);
+    setTaskResult({
+      taskId: task.taskId,
+      fileName: task.fileName,
+      status: task.status || 'UPLOADING',
+      progress: task.progress ?? 10,
+      currentStep: task.currentStep || fallbackStep,
+      courseId: task.courseId,
+    });
+    setSelectedCourseId(task.courseId ?? selectedCourseId);
+    setError('');
+    setEditorDraft(null);
+    setEditorLoading(false);
+    setMaterialVersions([]);
+    setVersionsLoading(false);
+    setCorrectionDraft(null);
+    setCorrectionLoading(false);
+    setCorrectionSyncNotice('');
+    setLiveLog('');
+    liveLogCursorRef.current = 0;
+    resetTransientPanels();
+
+    pollTaskStatus(task.taskId);
+    pollLiveLog(task.taskId);
+  };
+
   const pollTaskStatus = (taskId: number) => {
     const poll = async () => {
       try {
@@ -427,15 +638,25 @@ export const ResourceUpload: React.FC<ResourceUploadProps> = ({
 
         setProgress(taskInfo.progress);
         setCurrentStep(taskInfo.currentStep);
+        setTaskResult(taskInfo);
 
         if (taskInfo.status === 'COMPLETED') {
+          notification.success({
+            message: 'Parsing completed',
+            description: taskInfo.fileName,
+            duration: 4,
+          });
           await loadTaskIntoEditor(taskInfo);
+          // 刷新历史列表，让刚完成的任务出现在顶部
+          loadHistoryTasks();
           return;
         }
 
         if (taskInfo.status === 'FAILED') {
+          setTaskResult(taskInfo);
           setStatus('failed');
           setError(taskInfo.errorMessage || 'Failed to parse file');
+          loadHistoryTasks();
           return;
         }
 
@@ -476,10 +697,17 @@ export const ResourceUpload: React.FC<ResourceUploadProps> = ({
 
     try {
       const result = await uploadApi.uploadFile(file, activeUserId, selectedCourseId);
-      setStatus('parsing');
-      setProgress(10);
-      setCurrentStep('File uploaded, parsing in progress...');
-      pollTaskStatus(result.taskId);
+      beginTaskProcessing(
+        {
+          taskId: result.taskId,
+          fileName: result.fileName,
+          courseId: selectedCourseId,
+          status: result.status,
+          progress: 10,
+          currentStep: 'File uploaded, parsing in progress...',
+        },
+        'File uploaded, parsing in progress...',
+      );
     } catch (err: unknown) {
       setStatus('failed');
       setError(err instanceof Error ? err.message : 'Upload failed');
@@ -491,6 +719,52 @@ export const ResourceUpload: React.FC<ResourceUploadProps> = ({
     dismissedExternalTargetKeyRef.current = resourceUploadTargetKey;
     openedExternalTargetKeyRef.current = '';
     resetWorkingState();
+  };
+
+  /**
+   * 从历史解析记录列表打开一个旧任务。COMPLETED 直接加载编辑器查看对应关系；
+   * 其余状态给出明确提示，不做中间态。
+   */
+  const handleOpenHistoryTask = async (item: ParseTaskListItem) => {
+    if (item.status === 'COMPLETED') {
+      try {
+        const taskInfo = await uploadApi.getTaskStatus(item.taskId);
+        await loadTaskIntoEditor(taskInfo);
+      } catch (err: unknown) {
+        message.error(err instanceof Error ? err.message : 'Failed to open task');
+      }
+      return;
+    }
+    message.info(`Task ${item.taskId} status: ${item.status}`);
+  };
+
+  const handleRetryTask = async (taskId: number, fileName: string, courseId?: number | null) => {
+    setRetryingTask(true);
+    try {
+      const taskInfo = await uploadApi.retryTask(taskId);
+      if (!isUnmountedRef.current) {
+        message.success('Retry started');
+        beginTaskProcessing(
+          {
+            taskId: taskInfo.taskId,
+            fileName: taskInfo.fileName || fileName,
+            courseId: taskInfo.courseId ?? courseId ?? undefined,
+            status: taskInfo.status,
+            progress: taskInfo.progress,
+            currentStep: taskInfo.currentStep,
+          },
+          'Retry requested',
+        );
+      }
+    } catch (err: unknown) {
+      if (!isUnmountedRef.current) {
+        message.error(err instanceof Error ? err.message : 'Failed to retry task');
+      }
+    } finally {
+      if (!isUnmountedRef.current) {
+        setRetryingTask(false);
+      }
+    }
   };
 
   const updateEditorDraft = (updater: (draft: TeachingMaterialDraftInfo) => TeachingMaterialDraftInfo) => {
@@ -516,10 +790,20 @@ export const ResourceUpload: React.FC<ResourceUploadProps> = ({
     }));
   };
 
-  const updateQuestion = (index: number, field: keyof TeachingQuestionInfo, value: string | string[]) => {
+  const createEmptyQuestion = (): TeachingQuestionInfo => ({
+    questionType: 'SHORT_ANSWER',
+    difficulty: 'MEDIUM',
+    knowledgePointId: null,
+    stem: '',
+    options: [],
+    referenceAnswer: '',
+    scoringPoints: [''],
+  });
+
+  const updateQuestion = (index: number, field: keyof TeachingQuestionInfo, value: string | string[] | number | null) => {
     updateEditorDraft((draft) => {
       const questions = [...draft.questions];
-      const current = questions[index] || { stem: '', referenceAnswer: '', scoringPoints: [] };
+      const current = questions[index] || createEmptyQuestion();
       questions[index] = { ...current, [field]: value };
       return { ...draft, questions };
     });
@@ -528,7 +812,7 @@ export const ResourceUpload: React.FC<ResourceUploadProps> = ({
   const addQuestion = () => {
     updateEditorDraft((draft) => ({
       ...draft,
-      questions: [...draft.questions, { stem: '', referenceAnswer: '', scoringPoints: [''] }],
+      questions: [...draft.questions, createEmptyQuestion()],
     }));
   };
 
@@ -539,10 +823,45 @@ export const ResourceUpload: React.FC<ResourceUploadProps> = ({
     }));
   };
 
+  const updateQuestionOption = (questionIndex: number, optionIndex: number, value: string) => {
+    updateEditorDraft((draft) => {
+      const questions = [...draft.questions];
+      const target = questions[questionIndex] || createEmptyQuestion();
+      const options = [...(target.options || [])];
+      options[optionIndex] = value;
+      questions[questionIndex] = { ...target, options };
+      return { ...draft, questions };
+    });
+  };
+
+  const addQuestionOption = (questionIndex: number) => {
+    updateEditorDraft((draft) => {
+      const questions = [...draft.questions];
+      const target = questions[questionIndex] || createEmptyQuestion();
+      questions[questionIndex] = {
+        ...target,
+        options: [...(target.options || []), ''],
+      };
+      return { ...draft, questions };
+    });
+  };
+
+  const removeQuestionOption = (questionIndex: number, optionIndex: number) => {
+    updateEditorDraft((draft) => {
+      const questions = [...draft.questions];
+      const target = questions[questionIndex] || createEmptyQuestion();
+      questions[questionIndex] = {
+        ...target,
+        options: (target.options || []).filter((_, currentIndex) => currentIndex !== optionIndex),
+      };
+      return { ...draft, questions };
+    });
+  };
+
   const updateScoringPoint = (questionIndex: number, pointIndex: number, value: string) => {
     updateEditorDraft((draft) => {
       const questions = [...draft.questions];
-      const target = questions[questionIndex] || { stem: '', referenceAnswer: '', scoringPoints: [] };
+      const target = questions[questionIndex] || createEmptyQuestion();
       const scoringPoints = [...(target.scoringPoints || [])];
       scoringPoints[pointIndex] = value;
       questions[questionIndex] = { ...target, scoringPoints };
@@ -553,7 +872,7 @@ export const ResourceUpload: React.FC<ResourceUploadProps> = ({
   const addScoringPoint = (questionIndex: number) => {
     updateEditorDraft((draft) => {
       const questions = [...draft.questions];
-      const target = questions[questionIndex] || { stem: '', referenceAnswer: '', scoringPoints: [] };
+      const target = questions[questionIndex] || createEmptyQuestion();
       questions[questionIndex] = {
         ...target,
         scoringPoints: [...(target.scoringPoints || []), ''],
@@ -565,7 +884,7 @@ export const ResourceUpload: React.FC<ResourceUploadProps> = ({
   const removeScoringPoint = (questionIndex: number, pointIndex: number) => {
     updateEditorDraft((draft) => {
       const questions = [...draft.questions];
-      const target = questions[questionIndex] || { stem: '', referenceAnswer: '', scoringPoints: [] };
+      const target = questions[questionIndex] || createEmptyQuestion();
       questions[questionIndex] = {
         ...target,
         scoringPoints: (target.scoringPoints || []).filter((_, currentIndex) => currentIndex !== pointIndex),
@@ -579,11 +898,92 @@ export const ResourceUpload: React.FC<ResourceUploadProps> = ({
     lectureNotes: draft.lectureNotes || '',
     cases: (draft.cases || []).map((item) => item.trim()).filter(Boolean),
     questions: (draft.questions || []).map((question) => ({
+      questionType: question.questionType || 'SHORT_ANSWER',
+      difficulty: question.difficulty || 'MEDIUM',
+      knowledgePointId: question.knowledgePointId ?? null,
       stem: question.stem?.trim() || '',
+      options: (question.options || []).map((option) => option.trim()).filter(Boolean),
       referenceAnswer: question.referenceAnswer?.trim() || '',
       scoringPoints: (question.scoringPoints || []).map((point) => point.trim()).filter(Boolean),
     })),
   });
+
+  const handleCorrectionChange = (next: ParseTaskCorrectionDraftInfo) => {
+    setCorrectionDraft(buildCorrectionDraft(next));
+  };
+
+  const handleSaveCorrectionDraft = async () => {
+    if (!taskResult?.taskId || !correctionDraft) {
+      return;
+    }
+    setSavingCorrection(true);
+    try {
+      const saved = await uploadApi.saveCorrectionDraft(taskResult.taskId, correctionDraft.result);
+      const normalizedDraft = buildCorrectionDraft(saved);
+      setCorrectionDraft(normalizedDraft);
+
+      const hasMaterialSnapshot = Boolean(editorDraft?.materialId) || materialVersions.length > 0;
+      if (!hasMaterialSnapshot) {
+        const refreshedEditorDraft = await uploadApi.getEditorDraft(taskResult.taskId);
+        if (!isUnmountedRef.current) {
+          setEditorDraft(refreshedEditorDraft);
+          setSelectedCourseId(refreshedEditorDraft.courseId ?? taskResult.courseId ?? undefined);
+          await refreshEditorPanels(taskResult.taskId, refreshedEditorDraft.materialId, refreshedEditorDraft.courseId);
+          setCorrectionSyncNotice(
+            'Correction saved. Teaching editor baseline was refreshed because no material snapshot exists yet.',
+          );
+        }
+      } else if (!isUnmountedRef.current) {
+        setCorrectionSyncNotice(
+          'Correction saved. Existing teaching material snapshot was kept unchanged.',
+        );
+      }
+
+      if (!isUnmountedRef.current) {
+        message.success('Correction draft saved');
+      }
+    } catch (err: unknown) {
+      if (!isUnmountedRef.current) {
+        message.error(err instanceof Error ? err.message : 'Failed to save correction draft');
+      }
+    } finally {
+      if (!isUnmountedRef.current) {
+        setSavingCorrection(false);
+      }
+    }
+  };
+
+  const handleReparseTask = async () => {
+    if (!taskResult?.taskId || !taskResult.fileName) {
+      return;
+    }
+    setReparsingTask(true);
+    try {
+      const restarted = await uploadApi.reparseTask(taskResult.taskId);
+      if (!isUnmountedRef.current) {
+        message.success('Reparse started');
+        beginTaskProcessing(
+          {
+            taskId: restarted.taskId,
+            fileName: restarted.fileName || taskResult.fileName,
+            courseId: restarted.courseId ?? taskResult.courseId,
+            status: restarted.status,
+            progress: restarted.progress,
+            currentStep: restarted.currentStep,
+          },
+          'Reparse requested',
+        );
+      }
+    } catch (err: unknown) {
+      if (!isUnmountedRef.current) {
+        message.error(err instanceof Error ? err.message : 'Failed to reparse task');
+      }
+    } finally {
+      if (!isUnmountedRef.current) {
+        setReparsingTask(false);
+      }
+    }
+  };
 
   const handleSaveDraft = async () => {
     if (!taskResult?.taskId || !editorDraft) {
@@ -794,12 +1194,25 @@ export const ResourceUpload: React.FC<ResourceUploadProps> = ({
     }
   };
 
+  const getParseModeTag = (parseMode?: string) => {
+    if (parseMode === 'MINERU') {
+      return <Tag color="geekblue">MINERU</Tag>;
+    }
+    if (parseMode === 'FALLBACK_LLM') {
+      return <Tag color="orange">FALLBACK</Tag>;
+    }
+    if (parseMode === 'REGENERATE') {
+      return <Tag color="purple">REGENERATE</Tag>;
+    }
+    return null;
+  };
+
   const draggerProps = {
     name: 'file',
     multiple: false,
     fileList: [],
     beforeUpload: (nextFile: File) => {
-      const isAllowed = /\.(pdf|doc|docx|ppt|pptx|xls|xlsx)$/i.test(nextFile.name);
+      const isAllowed = /\.(pdf|doc|docx|ppt|pptx|xls|xlsx|md|markdown)$/i.test(nextFile.name);
       if (!isAllowed) {
         message.error(`${nextFile.name} format is not supported`);
         return Upload.LIST_IGNORE;
@@ -813,6 +1226,8 @@ export const ResourceUpload: React.FC<ResourceUploadProps> = ({
       setTaskResult(null);
       setEditorDraft(null);
       setMaterialVersions([]);
+      setCorrectionDraft(null);
+      setCorrectionSyncNotice('');
       resetTransientPanels();
       return false;
     },
@@ -846,6 +1261,94 @@ export const ResourceUpload: React.FC<ResourceUploadProps> = ({
             message={openContextWarning}
           />
         )}
+
+        <Card
+          bordered={false}
+          style={{ borderRadius: 12 }}
+          title={
+            <Space style={{ justifyContent: 'space-between', width: '100%' }}>
+              <Text strong>Parse History</Text>
+              <Button
+                size="small"
+                type="link"
+                icon={<ReloadOutlined />}
+                onClick={loadHistoryTasks}
+                loading={historyLoading}
+              >
+                Refresh
+              </Button>
+            </Space>
+          }
+        >
+          <List
+            size="small"
+            loading={historyLoading}
+            locale={{ emptyText: 'No parse task yet' }}
+            dataSource={historyTasks}
+            renderItem={(item) => {
+              const statusColor =
+                item.status === 'COMPLETED'
+                  ? 'success'
+                  : item.status === 'FAILED'
+                    ? 'error'
+                    : 'processing';
+              const createdLabel = item.createdAt ? new Date(item.createdAt).toLocaleString() : '';
+              const actions =
+                item.status === 'COMPLETED'
+                  ? [
+                      <Button
+                        key="open"
+                        size="small"
+                        type="link"
+                        onClick={() => handleOpenHistoryTask(item)}
+                      >
+                        Open
+                      </Button>,
+                    ]
+                  : item.status === 'FAILED'
+                    ? [
+                        <Button
+                          key="retry"
+                          size="small"
+                          type="link"
+                          loading={retryingTask}
+                          onClick={() => handleRetryTask(item.taskId, item.fileName, item.courseId)}
+                        >
+                          Retry
+                        </Button>,
+                      ]
+                    : [
+                        <Button key="view" size="small" type="link" disabled>
+                          View
+                        </Button>,
+                      ];
+              return (
+                <List.Item
+                  actions={actions}
+                >
+                  <List.Item.Meta
+                    avatar={getFileIcon(item.fileName)}
+                    title={
+                      <Space>
+                        <Text ellipsis style={{ maxWidth: 360 }}>{item.fileName}</Text>
+                        <Tag color={statusColor}>{item.status}</Tag>
+                        {getParseModeTag(item.parseMode)}
+                      </Space>
+                    }
+                    description={
+                      <Text type="secondary" style={{ fontSize: 12 }}>
+                        {createdLabel}
+                        {item.status === 'FAILED' && item.errorMessage
+                          ? ` · ${item.errorMessage.slice(0, 80)}`
+                          : ''}
+                      </Text>
+                    }
+                  />
+                </List.Item>
+              );
+            }}
+          />
+        </Card>
 
         <Card bordered={false} style={{ borderRadius: 12 }}>
           <Space direction="vertical" size={6} style={{ width: '100%' }}>
@@ -911,16 +1414,36 @@ export const ResourceUpload: React.FC<ResourceUploadProps> = ({
           )}
 
           {(status === 'uploading' || status === 'parsing') && (
-            <div style={{ textAlign: 'center', padding: '40px 0' }}>
-              <Spin size="large" style={{ marginBottom: 16 }} />
-              <div style={{ marginBottom: 16 }}>
+            <div style={{ padding: '12px 0' }}>
+              <Space align="center" style={{ marginBottom: 12 }}>
+                <Spin size="small" />
                 <Text strong>{currentStep || 'Processing...'}</Text>
-                <br />
-                <Text type="secondary" style={{ fontSize: 12 }}>
-                  {file?.name}
-                </Text>
-              </div>
-              <Progress percent={progress} status="active" />
+                {file?.name && (
+                  <Text type="secondary" style={{ fontSize: 12 }}>
+                    · {file.name}
+                  </Text>
+                )}
+              </Space>
+              <pre
+                ref={liveLogBoxRef}
+                style={{
+                  maxHeight: 280,
+                  minHeight: 160,
+                  overflowY: 'auto',
+                  backgroundColor: '#0f172a',
+                  color: '#e2e8f0',
+                  padding: 12,
+                  borderRadius: 8,
+                  fontSize: 12,
+                  lineHeight: 1.5,
+                  fontFamily: "'JetBrains Mono', 'Consolas', monospace",
+                  whiteSpace: 'pre-wrap',
+                  wordBreak: 'break-word',
+                  margin: 0,
+                }}
+              >
+                {liveLog || 'Waiting for LLM output...'}
+              </pre>
             </div>
           )}
 
@@ -932,9 +1455,23 @@ export const ResourceUpload: React.FC<ResourceUploadProps> = ({
               showIcon
               icon={<CloseCircleOutlined />}
               action={
-                <Button icon={<ReloadOutlined />} onClick={handleReset} size="small" type="primary" danger ghost>
-                  Upload Again
-                </Button>
+                <Space>
+                  <Button
+                    icon={<ReloadOutlined />}
+                    onClick={() => taskResult?.taskId && handleRetryTask(taskResult.taskId, taskResult.fileName)}
+                    size="small"
+                    type="primary"
+                    loading={retryingTask}
+                    disabled={!taskResult?.taskId}
+                    danger
+                    ghost
+                  >
+                    Retry Task
+                  </Button>
+                  <Button onClick={handleReset} size="small">
+                    Upload New File
+                  </Button>
+                </Space>
               }
               style={{ borderRadius: 12, padding: 24 }}
             />
@@ -956,29 +1493,82 @@ export const ResourceUpload: React.FC<ResourceUploadProps> = ({
               style={{ borderRadius: 12, padding: '16px 20px' }}
             />
 
-            {taskResult.parsedContent && (
-              <Card
-                title={<Space><FileTextOutlined style={{ color: '#1677ff' }} /> Parsed Content Summary</Space>}
-                bordered={false}
-                style={{ borderRadius: 12 }}
-              >
-                <Paragraph style={{ whiteSpace: 'pre-wrap', color: '#475569', fontSize: 14 }}>
-                  {taskResult.parsedContent}
-                </Paragraph>
-              </Card>
+            {/*
+              解析结果展示优先走 MineruStructuredView：当 MinerU 返回结构化内容时，
+              提供“大纲 / 全文 / 图片 / 表格 / 公式 / 分块”六个 Tab 的富视图；
+              其余情况（回退到本地抽取器）退化到 Markdown 预览卡片，避免破坏老流程。
+            */}
+            {correctionDraft?.result.documentStructure?.mineruContent ? (
+              <MineruStructuredView
+                content={correctionDraft.result.documentStructure.mineruContent}
+                rawMarkdown={
+                  correctionDraft.result.documentStructure.rawMarkdown ||
+                  taskResult.parsedContent
+                }
+                title={`Parsed Content: ${taskResult.fileName}`}
+                parseMode={correctionDraft.result.documentStructure.parseMode}
+              />
+            ) : (
+              taskResult.parsedContent && (
+                <Card
+                  title={(
+                    <Space size={8}>
+                      <FileTextOutlined style={{ color: '#1677ff' }} />
+                      <span>Parsed Content Summary</span>
+                      {getParseModeTag(correctionDraft?.result.documentStructure?.parseMode)}
+                    </Space>
+                  )}
+                  bordered={false}
+                  style={{
+                    borderRadius: 12,
+                    boxShadow: '0 1px 2px rgba(15, 23, 42, 0.04)',
+                  }}
+                  headStyle={{
+                    background: 'linear-gradient(90deg, #e6f4ff 0%, #ffffff 100%)',
+                    borderBottom: '1px solid #e2e8f0',
+                    borderRadius: '12px 12px 0 0',
+                  }}
+                  bodyStyle={{ padding: '18px 22px' }}
+                >
+                  <MarkdownView content={taskResult.parsedContent} />
+                </Card>
+              )
             )}
 
             {taskResult.aiAnalysis && (
               <Card
-                title={<Space><RobotOutlined style={{ color: '#ef4444' }} /> AI Analysis</Space>}
+                title={(
+                  <Space size={8}>
+                    <RobotOutlined style={{ color: '#ef4444' }} />
+                    <span>AI Analysis</span>
+                  </Space>
+                )}
                 bordered={false}
-                style={{ borderRadius: 12 }}
+                style={{
+                  borderRadius: 12,
+                  boxShadow: '0 1px 2px rgba(15, 23, 42, 0.04)',
+                }}
+                headStyle={{
+                  background: 'linear-gradient(90deg, #fff1f0 0%, #ffffff 100%)',
+                  borderBottom: '1px solid #fee2e2',
+                  borderRadius: '12px 12px 0 0',
+                }}
+                bodyStyle={{ padding: '18px 22px' }}
               >
-                <Paragraph style={{ whiteSpace: 'pre-wrap', color: '#475569', fontSize: 14 }}>
-                  {taskResult.aiAnalysis}
-                </Paragraph>
+                <MarkdownView content={taskResult.aiAnalysis} />
               </Card>
             )}
+
+            <ParseResultCorrectionCard
+              draft={correctionDraft}
+              loading={correctionLoading}
+              saving={savingCorrection}
+              reparsing={reparsingTask}
+              syncNotice={correctionSyncNotice}
+              onChange={handleCorrectionChange}
+              onSave={handleSaveCorrectionDraft}
+              onReparse={handleReparseTask}
+            />
 
             <TeachingMaterialEditorCard
               editorLoading={editorLoading}
@@ -1022,6 +1612,9 @@ export const ResourceUpload: React.FC<ResourceUploadProps> = ({
               onAddQuestion={addQuestion}
               onUpdateQuestion={updateQuestion}
               onRemoveQuestion={removeQuestion}
+              onUpdateQuestionOption={updateQuestionOption}
+              onAddQuestionOption={addQuestionOption}
+              onRemoveQuestionOption={removeQuestionOption}
               onUpdateScoringPoint={updateScoringPoint}
               onAddScoringPoint={addScoringPoint}
               onRemoveScoringPoint={removeScoringPoint}

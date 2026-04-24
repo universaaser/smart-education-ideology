@@ -5,13 +5,19 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.smartedu.dto.IdeologyMatchDto;
 import com.smartedu.dto.KnowledgePointDto;
 import com.smartedu.dto.PipelineResultDto;
+import com.smartedu.dto.ResourceCitationDto;
 import com.smartedu.dto.TeachingArtifactsDto;
 import com.smartedu.dto.TeachingMaterialDraftDto;
 import com.smartedu.dto.TeachingMaterialSaveRequestDto;
 import com.smartedu.dto.TeachingMaterialViewDto;
+import com.smartedu.entity.CourseMaterialRule;
 import com.smartedu.entity.ParseTask;
 import com.smartedu.entity.SubjectKnowledge;
 import com.smartedu.entity.TeachingMaterial;
+import com.smartedu.mapper.CourseMaterialRuleMapper;
+import com.smartedu.mapper.ParseTaskCorrectionMapper;
+import com.smartedu.mapper.ParseTaskIdeologyMatchMapper;
+import com.smartedu.mapper.ParseTaskKnowledgePointMapper;
 import com.smartedu.mapper.ParseTaskMapper;
 import com.smartedu.mapper.SubjectKnowledgeMapper;
 import com.smartedu.mapper.TeachingMaterialMapper;
@@ -29,7 +35,9 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Predicate;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class TeachingMaterialServiceTest {
@@ -57,9 +65,11 @@ class TeachingMaterialServiceTest {
 
         teachingMaterialService = new TeachingMaterialService(
                 teachingMaterialMapper,
+                buildCourseMaterialRuleMapper(null),
                 parseTaskMapper,
                 subjectKnowledgeMapper,
                 aiIntelligenceService,
+                buildCorrectionServiceStub(),
                 teachingMaterialTraceMapper,
                 new ObjectMapper()
         );
@@ -75,6 +85,8 @@ class TeachingMaterialServiceTest {
         assertEquals(1, draft.getCases().size());
         assertEquals(1, draft.getQuestions().size());
         assertEquals(1, draft.getTraceItems().size());
+        assertEquals("IoT Governance Report", draft.getTraceItems().get(0).getResourceTitle());
+        assertEquals("People Daily", draft.getTraceItems().get(0).getResourceSource());
     }
 
     @Test
@@ -84,9 +96,11 @@ class TeachingMaterialServiceTest {
 
         TeachingMaterialService localService = new TeachingMaterialService(
                 buildTeachingMaterialMapper(store),
+                buildCourseMaterialRuleMapper(null),
                 buildParseTaskMapper(parseTasks),
                 buildSubjectKnowledgeMapper(Map.of("IoT Security", 88L)),
                 buildAiServiceStub(buildPipelineResult()),
+                buildCorrectionServiceStub(),
                 buildTeachingMaterialTraceMapper(),
                 new ObjectMapper()
         );
@@ -128,6 +142,170 @@ class TeachingMaterialServiceTest {
         assertEquals(0, oldLatest.getIsLatest());
         assertTrue(store.records.stream().anyMatch(item ->
                 item.getVersionNo() == 2 && Integer.valueOf(1).equals(item.getIsLatest())));
+    }
+
+    @Test
+    void shouldRejectPublishedVersionWhenQuestionIsIncomplete() {
+        TeachingMaterialSaveRequestDto request = new TeachingMaterialSaveRequestDto();
+        request.setTitle("Invalid questions");
+        request.setLectureNotes("Updated notes");
+        request.setCases(List.of("Case A"));
+        TeachingArtifactsDto.QuestionDto question = new TeachingArtifactsDto.QuestionDto();
+        question.setQuestionType("SHORT_ANSWER");
+        question.setDifficulty("MEDIUM");
+        question.setStem("Question without answer");
+        question.setReferenceAnswer(" ");
+        question.setScoringPoints(List.of("Point 1"));
+        request.setQuestions(List.of(question));
+
+        assertThrows(IllegalArgumentException.class,
+                () -> teachingMaterialService.savePublishedVersion(1L, request));
+        assertTrue(store.records.isEmpty());
+    }
+
+    @Test
+    void shouldDropIncompleteQuestionsFromDraft() {
+        TeachingMaterialSaveRequestDto request = new TeachingMaterialSaveRequestDto();
+        request.setTitle("Draft with invalid questions");
+        request.setLectureNotes("Draft notes");
+        request.setCases(List.of("Case A"));
+        TeachingArtifactsDto.QuestionDto valid = new TeachingArtifactsDto.QuestionDto();
+        valid.setQuestionType("SINGLE_CHOICE");
+        valid.setDifficulty("HARD");
+        valid.setKnowledgePointId(88L);
+        valid.setStem("Valid question");
+        valid.setOptions(List.of("Option A", "Option B"));
+        valid.setReferenceAnswer("Valid answer");
+        valid.setScoringPoints(List.of("Point 1"));
+        TeachingArtifactsDto.QuestionDto invalid = new TeachingArtifactsDto.QuestionDto();
+        invalid.setStem(" ");
+        invalid.setReferenceAnswer("No stem");
+        request.setQuestions(List.of(valid, invalid));
+
+        TeachingMaterialDraftDto draft = teachingMaterialService.saveDraft(1L, request);
+
+        assertEquals(1, draft.getQuestions().size());
+        assertEquals("SINGLE_CHOICE", draft.getQuestions().get(0).getQuestionType());
+        assertEquals("HARD", draft.getQuestions().get(0).getDifficulty());
+        assertEquals(88L, draft.getQuestions().get(0).getKnowledgePointId());
+        assertEquals("Valid question", draft.getQuestions().get(0).getStem());
+        assertEquals(List.of("Option A", "Option B"), draft.getQuestions().get(0).getOptions());
+    }
+
+    @Test
+    void shouldRejectPublishedChoiceQuestionWithoutOptions() {
+        TeachingMaterialSaveRequestDto request = new TeachingMaterialSaveRequestDto();
+        request.setTitle("Invalid choice question");
+        request.setLectureNotes("Updated notes");
+        request.setCases(List.of("Case A"));
+        TeachingArtifactsDto.QuestionDto question = new TeachingArtifactsDto.QuestionDto();
+        question.setQuestionType("SINGLE_CHOICE");
+        question.setDifficulty("EASY");
+        question.setStem("Choice question");
+        question.setReferenceAnswer("A");
+        question.setScoringPoints(List.of("Point 1"));
+        request.setQuestions(List.of(question));
+
+        assertThrows(IllegalArgumentException.class,
+                () -> teachingMaterialService.savePublishedVersion(1L, request));
+        assertTrue(store.records.isEmpty());
+    }
+
+    @Test
+    void shouldRejectPublishedSingleChoiceWhenAnswerDoesNotMatchOptions() {
+        TeachingMaterialSaveRequestDto request = new TeachingMaterialSaveRequestDto();
+        request.setTitle("Invalid single choice answer");
+        request.setLectureNotes("Updated notes");
+        request.setCases(List.of("Case A"));
+        TeachingArtifactsDto.QuestionDto question = new TeachingArtifactsDto.QuestionDto();
+        question.setQuestionType("SINGLE_CHOICE");
+        question.setDifficulty("EASY");
+        question.setStem("Choice question");
+        question.setOptions(List.of("A. Edge device", "B. Cloud platform"));
+        question.setReferenceAnswer("Sensor network");
+        question.setScoringPoints(List.of("Point 1"));
+        request.setQuestions(List.of(question));
+
+        assertThrows(IllegalArgumentException.class,
+                () -> teachingMaterialService.savePublishedVersion(1L, request));
+        assertTrue(store.records.isEmpty());
+    }
+
+    @Test
+    void shouldPublishChoiceQuestionsWhenAnswersMatchOptionLabelsOrText() {
+        TeachingMaterialSaveRequestDto request = new TeachingMaterialSaveRequestDto();
+        request.setTitle("Valid choice answers");
+        request.setLectureNotes("Updated notes");
+        request.setCases(List.of("Case A"));
+        TeachingArtifactsDto.QuestionDto single = new TeachingArtifactsDto.QuestionDto();
+        single.setQuestionType("SINGLE_CHOICE");
+        single.setDifficulty("EASY");
+        single.setStem("Single choice");
+        single.setOptions(List.of("A. Edge device", "B. Cloud platform"));
+        single.setReferenceAnswer("A");
+        single.setScoringPoints(List.of("Point 1"));
+        TeachingArtifactsDto.QuestionDto multiple = new TeachingArtifactsDto.QuestionDto();
+        multiple.setQuestionType("MULTIPLE_CHOICE");
+        multiple.setDifficulty("MEDIUM");
+        multiple.setStem("Multiple choice");
+        multiple.setOptions(List.of("A. Sensor", "B. Gateway", "C. Workbook"));
+        multiple.setReferenceAnswer("Sensor、B");
+        multiple.setScoringPoints(List.of("Point 1"));
+        request.setQuestions(List.of(single, multiple));
+
+        TeachingMaterialViewDto saved = teachingMaterialService.savePublishedVersion(1L, request);
+
+        assertEquals("PUBLISHED", saved.getStatus());
+        assertEquals(2, saved.getQuestions().size());
+    }
+
+    @Test
+    void shouldRejectPublishedVersionWhenCourseRulesFail() {
+        TeachingMaterialSaveRequestDto request = new TeachingMaterialSaveRequestDto();
+        request.setTitle("Rule checked material");
+        request.setLectureNotes("Short notes");
+        request.setCases(List.of("Case without tag"));
+        request.setQuestions(new ArrayList<>());
+
+        TeachingMaterialService localService = new TeachingMaterialService(
+                buildTeachingMaterialMapper(store),
+                buildCourseMaterialRuleMapper("{\"minLectureCharacters\":20,\"requiredSections\":[\"Industrial IoT\"],\"requireIdeologyTagInCases\":true}"),
+                buildParseTaskMapper(Map.of(1L, buildParseTask(1L, "iot-outline.docx"))),
+                buildSubjectKnowledgeMapper(),
+                buildAiServiceStub(buildPipelineResult()),
+                buildCorrectionServiceStub(),
+                buildTeachingMaterialTraceMapper(),
+                new ObjectMapper()
+        );
+
+        assertThrows(IllegalArgumentException.class,
+                () -> localService.savePublishedVersion(1L, request));
+        assertTrue(store.records.isEmpty());
+    }
+
+    @Test
+    void shouldPublishVersionWhenCourseRulesPass() {
+        TeachingMaterialSaveRequestDto request = new TeachingMaterialSaveRequestDto();
+        request.setTitle("Rule checked material");
+        request.setLectureNotes("Industrial IoT enables trusted device coordination and responsible data governance.");
+        request.setCases(List.of("[Ideology: Responsibility] Edge device governance case"));
+        request.setQuestions(new ArrayList<>());
+
+        TeachingMaterialService localService = new TeachingMaterialService(
+                buildTeachingMaterialMapper(store),
+                buildCourseMaterialRuleMapper("{\"minLectureCharacters\":20,\"requiredSections\":[\"Industrial IoT\"],\"requireIdeologyTagInCases\":true}"),
+                buildParseTaskMapper(Map.of(1L, buildParseTask(1L, "iot-outline.docx"))),
+                buildSubjectKnowledgeMapper(),
+                buildAiServiceStub(buildPipelineResult()),
+                buildCorrectionServiceStub(),
+                buildTeachingMaterialTraceMapper(),
+                new ObjectMapper()
+        );
+
+        TeachingMaterialViewDto saved = localService.savePublishedVersion(1L, request);
+
+        assertEquals("PUBLISHED", saved.getStatus());
+        assertEquals("Rule checked material", saved.getTitle());
     }
 
     @Test
@@ -196,7 +374,10 @@ class TeachingMaterialServiceTest {
     }
 
     @Test
-    void shouldBuildMarkdownWithEscapedCharactersAndFallbackTitle() {
+    void shouldBuildMarkdownPreservingOriginalMarkdownAndFallbackTitle() {
+        // Regression: exported content must keep "content is markdown" semantics
+        // so that AI-authored Markdown (Selection Explanation, AI analysis, etc.)
+        // survives export without being backslash-escaped.
         TeachingMaterial material = new TeachingMaterial();
         material.setId(100L);
         material.setParseTaskId(1L);
@@ -204,8 +385,8 @@ class TeachingMaterialServiceTest {
         material.setTitle("");
         material.setLectureNotes("Topic #1: edge *case*");
         material.setCasesJson("[\"Case [A]\"]");
-        material.setQuestionsJson("[{\"stem\":\"Q(1)\",\"referenceAnswer\":\"Ans|1\",\"scoringPoints\":[\"P-1\"]}]");
-        material.setTraceJson("[{\"parseTaskId\":1,\"knowledgePointName\":\"IoT\",\"knowledgePointId\":null,\"ideologyElement\":\"Responsibility\",\"evidenceSnippet\":\"snippet\",\"matchReason\":\"reason\"}]");
+        material.setQuestionsJson("[{\"questionType\":\"SINGLE_CHOICE\",\"difficulty\":\"EASY\",\"knowledgePointId\":88,\"stem\":\"Q(1) with a long stem that should stay in the Stem block instead of the heading\",\"options\":[\"A. One\",\"B. Two\"],\"referenceAnswer\":\"Ans|1\",\"scoringPoints\":[\"P-1\"]}]");
+        material.setTraceJson("[{\"parseTaskId\":1,\"knowledgePointName\":\"IoT\",\"knowledgePointId\":null,\"ideologyElement\":\"Responsibility\",\"evidenceSnippet\":\"snippet\",\"matchReason\":\"reason\",\"resourceTitle\":\"People Daily Report\",\"resourceSource\":\"People Daily\",\"resourceSourceUrl\":\"https://example.com/report\",\"resourceQuotedExcerpt\":\"Quoted resource excerpt\",\"citationExplanation\":\"Resource-backed explanation\"}]");
         material.setSchemaVersion("v1");
         material.setVersionNo(3);
         material.setStatus("PUBLISHED");
@@ -218,10 +399,33 @@ class TeachingMaterialServiceTest {
 
         String markdown = teachingMaterialService.exportMarkdownByMaterialId(100L);
         assertTrue(markdown.contains("# Teaching Material"));
-        assertTrue(markdown.contains("Topic \\#1: edge \\*case\\*"));
-        assertTrue(markdown.contains("Case \\[A\\]"));
-        assertTrue(markdown.contains("Ans\\|1"));
-        assertTrue(markdown.contains("## Trace Summary"));
+        assertTrue(markdown.contains("## Lecture Notes"));
+        assertTrue(markdown.contains("## Teaching Cases"));
+        assertTrue(markdown.contains("### Case 1"));
+        assertTrue(markdown.contains("## Assessment Questions"));
+        assertTrue(markdown.contains("### Question 1"));
+        assertTrue(markdown.contains("**Type**: SINGLE_CHOICE"));
+        assertTrue(markdown.contains("**Difficulty**: EASY"));
+        assertTrue(markdown.contains("**Knowledge Point ID**: 88"));
+        assertTrue(markdown.contains("**Stem**"));
+        assertTrue(markdown.contains("Q(1) with a long stem"));
+        assertTrue(markdown.contains("**Options**"));
+        assertTrue(markdown.contains("A. One"));
+        assertFalse(markdown.contains("### Q(1)"));
+        // 原生 Markdown 字符必须按原样保留，不再被反斜杠转义。
+        assertTrue(markdown.contains("Topic #1: edge *case*"));
+        assertTrue(markdown.contains("Topic #1: edge *case*"));
+        assertTrue(markdown.contains("Case [A]"));
+        assertTrue(markdown.contains("Ans|1"));
+        assertFalse(markdown.contains("\\#"));
+        assertFalse(markdown.contains("\\*"));
+        assertFalse(markdown.contains("\\["));
+        assertTrue(markdown.contains("## Ideology Integration"));
+        assertTrue(markdown.contains("### Integration 1"));
+        assertTrue(markdown.contains("**Integration Reason**"));
+        assertTrue(markdown.contains("**Resource Title**"));
+        assertTrue(markdown.contains("People Daily Report"));
+        assertTrue(markdown.contains("**Citation Explanation**"));
         assertTrue(teachingMaterialService.buildMarkdownFileName(100L).endsWith("-v3.md"));
     }
 
@@ -245,9 +449,11 @@ class TeachingMaterialServiceTest {
 
         TeachingMaterialService localService = new TeachingMaterialService(
                 buildTeachingMaterialMapper(store, item -> Long.valueOf(9L).equals(item.getCourseId())),
+                buildCourseMaterialRuleMapper(null),
                 buildParseTaskMapper(parseTasks),
                 buildSubjectKnowledgeMapper(),
                 buildAiServiceStub(buildPipelineResult()),
+                buildCorrectionServiceStub(),
                 buildTeachingMaterialTraceMapper(),
                 new ObjectMapper()
         );
@@ -334,6 +540,23 @@ class TeachingMaterialServiceTest {
 
     private TeachingMaterialMapper buildTeachingMaterialMapper(TeachingMaterialStore localStore) {
         return buildTeachingMaterialMapper(localStore, item -> true);
+    }
+
+    private CourseMaterialRuleMapper buildCourseMaterialRuleMapper(String ruleJson) {
+        return (CourseMaterialRuleMapper) Proxy.newProxyInstance(
+                CourseMaterialRuleMapper.class.getClassLoader(),
+                new Class[]{CourseMaterialRuleMapper.class},
+                (proxy, method, args) -> {
+                    if ("selectOne".equals(method.getName()) && ruleJson != null) {
+                        CourseMaterialRule rule = new CourseMaterialRule();
+                        rule.setId(1L);
+                        rule.setCourseId(9L);
+                        rule.setRuleJson(ruleJson);
+                        rule.setUpdatedAt(LocalDateTime.now());
+                        return rule;
+                    }
+                    return primitiveDefault(method.getReturnType());
+                });
     }
 
     private TeachingMaterialMapper buildTeachingMaterialMapper(
@@ -429,6 +652,13 @@ class TeachingMaterialServiceTest {
                 new ObjectMapper(),
                 null,
                 new AiPipelineJsonValidator(new ObjectMapper()),
+                null,
+                null,
+                new DocumentTextExtractor(),
+                new MineruParseClient(new ObjectMapper()),
+                new AiStreamBuffer(),
+                emptyKnowledgePointMapper(),
+                emptyIdeologyMatchMapper(),
                 null
         ) {
             @Override
@@ -436,6 +666,54 @@ class TeachingMaterialServiceTest {
                 return resultDto;
             }
         };
+    }
+
+    private ParseTaskCorrectionService buildCorrectionServiceStub() {
+        return new ParseTaskCorrectionService(
+                (ParseTaskCorrectionMapper) Proxy.newProxyInstance(
+                        ParseTaskCorrectionMapper.class.getClassLoader(),
+                        new Class[]{ParseTaskCorrectionMapper.class},
+                        (proxy, method, args) -> null),
+                (ParseTaskMapper) Proxy.newProxyInstance(
+                        ParseTaskMapper.class.getClassLoader(),
+                        new Class[]{ParseTaskMapper.class},
+                        (proxy, method, args) -> null),
+                emptyKnowledgePointMapper(),
+                emptyIdeologyMatchMapper(),
+                buildAiServiceStub(buildPipelineResult()),
+                new AiPipelineJsonValidator(new ObjectMapper()),
+                new VectorIndexAsyncService(new VectorIndexService(new ObjectMapper())),
+                new ObjectMapper()
+        ) {
+            @Override
+            public PipelineResultDto resolveEffectivePipelineResult(ParseTask task, PipelineResultDto fallback) {
+                return fallback;
+            }
+        };
+    }
+
+    private ParseTaskKnowledgePointMapper emptyKnowledgePointMapper() {
+        return (ParseTaskKnowledgePointMapper) Proxy.newProxyInstance(
+                ParseTaskKnowledgePointMapper.class.getClassLoader(),
+                new Class[]{ParseTaskKnowledgePointMapper.class},
+                (proxy, method, args) -> primitiveDefault(method.getReturnType()));
+    }
+
+    private ParseTaskIdeologyMatchMapper emptyIdeologyMatchMapper() {
+        return (ParseTaskIdeologyMatchMapper) Proxy.newProxyInstance(
+                ParseTaskIdeologyMatchMapper.class.getClassLoader(),
+                new Class[]{ParseTaskIdeologyMatchMapper.class},
+                (proxy, method, args) -> primitiveDefault(method.getReturnType()));
+    }
+
+    private Object primitiveDefault(Class<?> returnType) {
+        if (returnType.equals(boolean.class)) {
+            return false;
+        }
+        if (returnType.isPrimitive()) {
+            return 0;
+        }
+        return null;
     }
 
     private TeachingMaterialTraceMapper buildTeachingMaterialTraceMapper() {
@@ -463,6 +741,8 @@ class TeachingMaterialServiceTest {
         artifacts.setLectureNotes("Generated lecture notes");
         artifacts.setCases(List.of("Case 1"));
         TeachingArtifactsDto.QuestionDto question = new TeachingArtifactsDto.QuestionDto();
+        question.setQuestionType("SHORT_ANSWER");
+        question.setDifficulty("MEDIUM");
         question.setStem("Question 1");
         question.setReferenceAnswer("Answer 1");
         question.setScoringPoints(List.of("Point 1"));
@@ -472,12 +752,23 @@ class TeachingMaterialServiceTest {
         KnowledgePointDto point = new KnowledgePointDto();
         point.setPointName("IoT Security");
         point.setEvidenceSnippet("Evidence snippet");
+        point.setResourceCitations(List.of(
+                new ResourceCitationDto(
+                        "R1",
+                        101L,
+                        "IoT Governance Report",
+                        "People Daily",
+                        "https://example.com/iot-governance",
+                        "Industrial IoT systems need clear safety and governance boundaries.",
+                        "This excerpt helps explain the governance implication of the knowledge point.")));
         resultDto.setKnowledgePoints(List.of(point));
 
         IdeologyMatchDto match = new IdeologyMatchDto();
         match.setKnowledgePointName("IoT Security");
         match.setIdeologyElement("Cyber Responsibility");
         match.setMatchReason("Aligned with public safety and ethics");
+        match.setCitationExplanation("The cited resource connects IoT security with public responsibility and governance.");
+        match.setResourceCitations(point.getResourceCitations());
         resultDto.setIdeologyMatches(List.of(match));
 
         resultDto.setSchemaVersion("v1");

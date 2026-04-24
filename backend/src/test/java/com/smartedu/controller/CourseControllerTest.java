@@ -116,7 +116,7 @@ class CourseControllerTest {
     private static class StubTeachingMaterialService extends TeachingMaterialService {
 
         StubTeachingMaterialService() {
-            super(null, null, null, null, null, null);
+            super(null, null, null, null, null, null, null, null);
         }
 
         @Override

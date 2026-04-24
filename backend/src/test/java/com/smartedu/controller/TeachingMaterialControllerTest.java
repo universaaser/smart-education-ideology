@@ -2,12 +2,17 @@ package com.smartedu.controller;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.smartedu.dto.TeachingMaterialViewDto;
+import com.smartedu.mapper.CourseMaterialRuleMapper;
+import com.smartedu.mapper.ParseTaskIdeologyMatchMapper;
+import com.smartedu.mapper.ParseTaskKnowledgePointMapper;
 import com.smartedu.mapper.ParseTaskMapper;
 import com.smartedu.mapper.SubjectKnowledgeMapper;
 import com.smartedu.mapper.TeachingMaterialMapper;
 import com.smartedu.mapper.TeachingMaterialTraceMapper;
+import com.smartedu.service.AiStreamBuffer;
 import com.smartedu.service.AiPipelineJsonValidator;
 import com.smartedu.service.AiIntelligenceService;
+import com.smartedu.service.DocumentTextExtractor;
 import com.smartedu.service.TeachingMaterialService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -60,6 +65,11 @@ class TeachingMaterialControllerTest {
                             new Class[]{TeachingMaterialMapper.class},
                             (proxy, method, args) -> null
                     ),
+                    (CourseMaterialRuleMapper) Proxy.newProxyInstance(
+                            CourseMaterialRuleMapper.class.getClassLoader(),
+                            new Class[]{CourseMaterialRuleMapper.class},
+                            (proxy, method, args) -> null
+                    ),
                     (ParseTaskMapper) Proxy.newProxyInstance(
                             ParseTaskMapper.class.getClassLoader(),
                             new Class[]{ParseTaskMapper.class},
@@ -78,8 +88,16 @@ class TeachingMaterialControllerTest {
                             new ObjectMapper(),
                             null,
                             new AiPipelineJsonValidator(new ObjectMapper()),
+                            null,
+                            null,
+                            new DocumentTextExtractor(),
+                            new com.smartedu.service.MineruParseClient(new ObjectMapper()),
+                            new AiStreamBuffer(),
+                            emptyKnowledgePointMapper(),
+                            emptyIdeologyMatchMapper(),
                             null
                     ),
+                    null,
                     (TeachingMaterialTraceMapper) Proxy.newProxyInstance(
                             TeachingMaterialTraceMapper.class.getClassLoader(),
                             new Class[]{TeachingMaterialTraceMapper.class},
@@ -110,6 +128,30 @@ class TeachingMaterialControllerTest {
         @Override
         public String buildMarkdownFileName(Long materialId) {
             return "iot-outline-v2.md";
+        }
+
+        private static ParseTaskKnowledgePointMapper emptyKnowledgePointMapper() {
+            return (ParseTaskKnowledgePointMapper) Proxy.newProxyInstance(
+                    ParseTaskKnowledgePointMapper.class.getClassLoader(),
+                    new Class[]{ParseTaskKnowledgePointMapper.class},
+                    (proxy, method, args) -> primitiveDefault(method.getReturnType()));
+        }
+
+        private static ParseTaskIdeologyMatchMapper emptyIdeologyMatchMapper() {
+            return (ParseTaskIdeologyMatchMapper) Proxy.newProxyInstance(
+                    ParseTaskIdeologyMatchMapper.class.getClassLoader(),
+                    new Class[]{ParseTaskIdeologyMatchMapper.class},
+                    (proxy, method, args) -> primitiveDefault(method.getReturnType()));
+        }
+
+        private static Object primitiveDefault(Class<?> returnType) {
+            if (returnType.equals(boolean.class)) {
+                return false;
+            }
+            if (returnType.isPrimitive()) {
+                return 0;
+            }
+            return null;
         }
     }
 }

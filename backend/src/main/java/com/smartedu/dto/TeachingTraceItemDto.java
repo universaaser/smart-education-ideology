@@ -26,4 +26,14 @@ public class TeachingTraceItemDto {
     private String evidenceSnippet;
 
     private String matchReason;
+
+    private String resourceTitle;
+
+    private String resourceSource;
+
+    private String resourceSourceUrl;
+
+    private String resourceQuotedExcerpt;
+
+    private String citationExplanation;
 }

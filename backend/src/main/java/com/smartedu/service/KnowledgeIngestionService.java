@@ -121,7 +121,7 @@ public class KnowledgeIngestionService {
         String syntheticSourceUrl = "upload://parse-task/" + task.getId();
         Resource existing = resourceService.getBySourceUrl(syntheticSourceUrl);
         PipelineResultDto pipelineResult = parsePipelineResult(task.getAiAnalysis());
-        DocumentStructureDto documentStructure = parseDocumentStructure(task.getParsedContent());
+        DocumentStructureDto documentStructure = resolveDocumentStructure(pipelineResult, task.getParsedContent());
         String resourceContent = buildResourceContent(documentStructure, pipelineResult);
         String ideologySummary = buildIdeologySummary(pipelineResult);
         String tags = buildTagsFromTask(task, pipelineResult);
@@ -433,6 +433,8 @@ public class KnowledgeIngestionService {
             tags.add("word");
         } else if (fileName.endsWith(".ppt") || fileName.endsWith(".pptx")) {
             tags.add("slide");
+        } else if (fileName.endsWith(".md") || fileName.endsWith(".markdown")) {
+            tags.add("markdown");
         }
 
         if (pipelineResult != null && pipelineResult.getIdeologyMatches() != null) {
@@ -463,7 +465,10 @@ public class KnowledgeIngestionService {
         }
     }
 
-    private DocumentStructureDto parseDocumentStructure(String parsedContentJson) {
+    private DocumentStructureDto resolveDocumentStructure(PipelineResultDto pipelineResult, String parsedContentJson) {
+        if (pipelineResult != null && pipelineResult.getDocumentStructure() != null) {
+            return pipelineResult.getDocumentStructure();
+        }
         if (parsedContentJson == null || parsedContentJson.isBlank()) {
             return null;
         }

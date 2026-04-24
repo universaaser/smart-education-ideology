@@ -1,4 +1,4 @@
-﻿# 智教思政后端服务配置文件
+# 智教思政后端服务配置文件
 server:
   port: 8080
   servlet:
@@ -43,7 +43,7 @@ ai:
   proxy:
     enabled: false
     label: ${AI_PROXY_LABEL:default-proxy}
-    api-key: ${AI_PROXY_API_KEY:codex_fdc40f2667d778e09fc46906389afa1d031c4ce07d8a3ca8}
+    api-key: ${AI_PROXY_API_KEY:}
     base-url: ${AI_PROXY_API_BASE:https://codex.miaomiaocode.com/v1}
     model: ${AI_PROXY_MODEL:gpt-5-codex-mini}
     timeout: 120
@@ -51,7 +51,20 @@ ai:
   # 后台任务自动回退顺序与熔断阈值
   routing:
     default-chat-provider: ${AI_DEFAULT_CHAT_PROVIDER:openai}
+    # 后台链路：逗号分隔，按顺序尝试，未 enabled 的节点会自动跳过。
+    # 默认只启用 openai 一个节点，保持与现有行为一致；接上额外节点时在此追加即可。
+    background-chain: ${AI_BACKGROUND_CHAIN:openai}
     failure-threshold: ${AI_FAILURE_THRESHOLD:3}
+    # 熔断冷却秒数：达到阈值后经过该时长允许一次半开探活，避免需重启后端才恢复。
+    circuit-cool-down-seconds: ${AI_CIRCUIT_COOL_DOWN_SECONDS:60}
+
+  routes:
+    chat: ${AI_ROUTE_CHAT:openai}
+    parse: ${AI_ROUTE_PARSE:openai}
+    ideology: ${AI_ROUTE_IDEOLOGY:openai}
+    question-gen: ${AI_ROUTE_QUESTION_GEN:openai}
+    crawl: ${AI_ROUTE_CRAWL:openai}
+    path: ${AI_ROUTE_PATH:openai}
 
   pipeline:
     max-input-chars: ${AI_PIPELINE_MAX_INPUT_CHARS:5000}
@@ -86,14 +99,48 @@ ai:
     model: ${GEMINI_MODEL:}
     timeout: 120
 
+  # Phase 3A: embedding model config (reuses openai-compatible provider base-url when provider=openai)
+  embedding:
+    enabled: ${EMBEDDING_ENABLED:false}
+    provider: ${EMBEDDING_PROVIDER:openai}
+    model: ${EMBEDDING_MODEL:text-embedding-3-small}
+    dimensions: ${EMBEDDING_DIMENSIONS:1536}
+    api-key: ${EMBEDDING_API_KEY:}
+    base-url: ${EMBEDDING_BASE_URL:}
+    timeout: 30
+
 mineru:
-  api-key: ${MINERU_API_KEY:your-mineru-api-key}
-  base-url: ${MINERU_API_BASE:https://api.mineru.ai/v1}
-  timeout: 300
+  # 以 MinerU 为文档解析首选入口；enabled=false 或 api-key 缺失时整条链路自动回退到本地 POI/PDFBox 抽取。
+  enabled: ${MINERU_ENABLED:true}
+  # MinerU token 只从 MINERU_API_KEY 环境变量读取，避免把疑似真实密钥固化到仓库。
+  api-key: ${MINERU_API_KEY:}
+  base-url: ${MINERU_API_BASE:https://mineru.net/api/v4}
+  model-version: ${MINERU_MODEL_VERSION:vlm}
+  language: ${MINERU_LANGUAGE:ch}
+  enable-formula: ${MINERU_ENABLE_FORMULA:true}
+  enable-table: ${MINERU_ENABLE_TABLE:true}
+  is-ocr: ${MINERU_IS_OCR:false}
+  # 单次解析整体超时（秒），覆盖申请-上传-轮询-下载全流程。
+  timeout: ${MINERU_TIMEOUT:300}
+  # 单 HTTP 请求超时（秒）。
+  http-timeout: ${MINERU_HTTP_TIMEOUT:60}
+  # MinerU zip 解压后图片/附件的本地存放目录；前端通过 asset-url-prefix 静态访问。
+  assets-path: ${MINERU_ASSETS_PATH:./uploads/mineru-assets}
+  asset-url-prefix: ${MINERU_ASSET_URL_PREFIX:/api/upload/mineru-assets}
+
+# Phase 3A: Qdrant vector search layer
+qdrant:
+  enabled: ${QDRANT_ENABLED:false}
+  host: ${QDRANT_HOST:localhost}
+  port: ${QDRANT_PORT:6333}
+  # Collection names used by the semantic search service
+  collection-knowledge-points: knowledge_points
+  collection-ideology-matches: ideology_matches
+  collection-selection-explain: selection_explain
 
 storage:
   upload-path: ./uploads
-  allowed-types: pdf,doc,docx,ppt,pptx,xls,xlsx
+  allowed-types: pdf,doc,docx,ppt,pptx,xls,xlsx,md,markdown
 
 logging:
   level:

@@ -3,14 +3,17 @@ import {
   dashboardApi,
   courseApi,
   materialApi,
+  semanticApi,
   CourseInfo,
   CourseTeachingMaterialGroupInfo,
   KnowledgeNodeInfo,
   TeachingMaterialViewInfo,
+  SemanticHit,
 } from '../services/api';
 import { downloadBlobFile } from '../services/download';
 import { useAuth } from '../contexts/AuthContext';
 import { View, ViewChangeHandler } from '../types';
+import { TeachingMaterialPreview } from '../components/TeachingMaterialPreview';
 import {
   Input, Button, Collapse, Modal, Form, Tag, Progress,
   Space, Spin, Empty, Typography, Avatar, Row, Col, Card,
@@ -19,10 +22,11 @@ import {
 import {
   SearchOutlined, PlusOutlined, InteractionOutlined,
   ShareAltOutlined, RobotOutlined, CodeOutlined, HeartOutlined,
-  FileTextOutlined, DownloadOutlined, EditOutlined, BookOutlined
+  FileTextOutlined, DownloadOutlined, EditOutlined, BookOutlined,
+  CompassOutlined
 } from '@ant-design/icons';
 
-const { Text, Title, Paragraph } = Typography;
+const { Text, Title } = Typography;
 
 interface ResourceLibraryProps {
   onChangeView?: ViewChangeHandler;
@@ -40,6 +44,9 @@ export const ResourceLibrary: React.FC<ResourceLibraryProps> = ({ onChangeView }
   const [materialGroupsMap, setMaterialGroupsMap] = useState<Record<number, CourseTeachingMaterialGroupInfo[]>>({});
   const [materialLoadingMap, setMaterialLoadingMap] = useState<Record<number, boolean>>({});
   const [searchKeyword, setSearchKeyword] = useState('');
+  const [semanticQuery, setSemanticQuery] = useState('');
+  const [semanticResults, setSemanticResults] = useState<SemanticHit[]>([]);
+  const [semanticLoading, setSemanticLoading] = useState(false);
 
   const [showNewCourse, setShowNewCourse] = useState(false);
   const [form] = Form.useForm();
@@ -180,6 +187,28 @@ export const ResourceLibrary: React.FC<ResourceLibraryProps> = ({ onChangeView }
         materialId,
       },
     });
+  };
+
+  const handleSemanticSearch = async () => {
+    const query = semanticQuery.trim();
+    if (!query) {
+      setSemanticResults([]);
+      return;
+    }
+    setSemanticLoading(true);
+    try {
+      const hits = await semanticApi.search({
+        scope: 'knowledge_points',
+        text: query,
+        topK: 8,
+      });
+      setSemanticResults(hits);
+    } catch {
+      message.error('Semantic search failed. Ensure vector search backend is enabled.');
+      setSemanticResults([]);
+    } finally {
+      setSemanticLoading(false);
+    }
   };
 
   const filteredCourses = courses.filter(course =>
@@ -452,6 +481,17 @@ export const ResourceLibrary: React.FC<ResourceLibraryProps> = ({ onChangeView }
           </Col>
           <Col>
             <Space size={16}>
+              <Input.Search
+                placeholder="Semantic search (knowledge points)..."
+                prefix={<CompassOutlined />}
+                value={semanticQuery}
+                onChange={event => setSemanticQuery(event.target.value)}
+                onSearch={handleSemanticSearch}
+                loading={semanticLoading}
+                style={{ width: 260, borderRadius: 8 }}
+                allowClear
+                enterButton
+              />
               <Input
                 placeholder="Search courses..."
                 prefix={<SearchOutlined />}
@@ -466,6 +506,41 @@ export const ResourceLibrary: React.FC<ResourceLibraryProps> = ({ onChangeView }
             </Space>
           </Col>
         </Row>
+
+        {semanticResults.length > 0 && (
+          <Card
+            size="small"
+            title={
+              <Space>
+                <CompassOutlined style={{ color: '#1677ff' }} />
+                <Text strong>Semantic Search Results</Text>
+              </Space>
+            }
+            style={{ borderRadius: 12, border: '1px solid #e2e8f0' }}
+          >
+            <List
+              size="small"
+              dataSource={semanticResults}
+              renderItem={item => (
+                <List.Item>
+                  <List.Item.Meta
+                    title={
+                      <Space>
+                        <Text strong>{item.title || 'Untitled'}</Text>
+                        <Tag color="blue">{(item.score ?? 0).toFixed(3)}</Tag>
+                      </Space>
+                    }
+                    description={
+                      <Text type="secondary" style={{ fontSize: 13 }}>
+                        {item.snippet || '-'}
+                      </Text>
+                    }
+                  />
+                </List.Item>
+              )}
+            />
+          </Card>
+        )}
 
         {filteredCourses.length > 0 ? (
           <Collapse
@@ -541,98 +616,7 @@ export const ResourceLibrary: React.FC<ResourceLibraryProps> = ({ onChangeView }
             <Spin />
           </div>
         ) : previewMaterial ? (
-          <Space direction="vertical" size="large" style={{ width: '100%' }}>
-            <Card size="small">
-              <Space direction="vertical" size={4}>
-                <Text strong>Version</Text>
-                <Text>v{previewMaterial.versionNo || '-'}</Text>
-                <Text strong>Status</Text>
-                <Tag color={mapMaterialStatusColor(previewMaterial.status)}>{previewMaterial.status || 'UNKNOWN'}</Tag>
-                <Text strong>Source File</Text>
-                <Text>{previewSourceFileName || '-'}</Text>
-                <Text strong>Updated</Text>
-                <Text>{formatTimestamp(previewMaterial.updatedAt)}</Text>
-              </Space>
-            </Card>
-
-            <div>
-              <Text strong>Lecture Notes</Text>
-              <Paragraph style={{ whiteSpace: 'pre-wrap', marginTop: 8 }}>
-                {previewMaterial.lectureNotes || 'No lecture notes.'}
-              </Paragraph>
-            </div>
-
-            <div>
-              <Text strong>Cases</Text>
-              {(previewMaterial.cases || []).length > 0 ? (
-                <List
-                  size="small"
-                  dataSource={previewMaterial.cases}
-                  renderItem={item => <List.Item>{item}</List.Item>}
-                  style={{ marginTop: 8 }}
-                />
-              ) : (
-                <Text type="secondary" style={{ display: 'block', marginTop: 8 }}>No cases.</Text>
-              )}
-            </div>
-
-            <div>
-              <Text strong>Questions</Text>
-              {(previewMaterial.questions || []).length > 0 ? (
-                <Space direction="vertical" style={{ width: '100%', marginTop: 8 }}>
-                  {previewMaterial.questions.map((question, index) => (
-                    <Card key={`preview-question-${index}`} size="small">
-                      <Space direction="vertical" size={8} style={{ width: '100%' }}>
-                        <Text strong>{question.stem || `Question ${index + 1}`}</Text>
-                        <div>
-                          <Text strong>Reference Answer</Text>
-                          <Paragraph style={{ whiteSpace: 'pre-wrap', marginBottom: 0 }}>
-                            {question.referenceAnswer || 'No reference answer.'}
-                          </Paragraph>
-                        </div>
-                        <div>
-                          <Text strong>Scoring Points</Text>
-                          {(question.scoringPoints || []).length > 0 ? (
-                            <List
-                              size="small"
-                              dataSource={question.scoringPoints}
-                              renderItem={item => <List.Item>{item}</List.Item>}
-                            />
-                          ) : (
-                            <Text type="secondary">No scoring points.</Text>
-                          )}
-                        </div>
-                      </Space>
-                    </Card>
-                  ))}
-                </Space>
-              ) : (
-                <Text type="secondary" style={{ display: 'block', marginTop: 8 }}>No questions.</Text>
-              )}
-            </div>
-
-            <div>
-              <Text strong>Trace Summary</Text>
-              {(previewMaterial.traceItems || []).length > 0 ? (
-                <Space direction="vertical" style={{ width: '100%', marginTop: 8 }}>
-                  {previewMaterial.traceItems.map((trace, index) => (
-                    <Card key={`preview-trace-${index}`} size="small">
-                      <Space direction="vertical" size={6}>
-                        <Space wrap>
-                          <Tag color="blue">{trace.knowledgePointName || 'Unknown Point'}</Tag>
-                          <Tag color="red">{trace.ideologyElement || 'Unknown Element'}</Tag>
-                        </Space>
-                        <Text type="secondary">{trace.evidenceSnippet || '-'}</Text>
-                        <Text>{trace.matchReason || '-'}</Text>
-                      </Space>
-                    </Card>
-                  ))}
-                </Space>
-              ) : (
-                <Text type="secondary" style={{ display: 'block', marginTop: 8 }}>No trace summary.</Text>
-              )}
-            </div>
-          </Space>
+          <TeachingMaterialPreview material={previewMaterial} sourceFileName={previewSourceFileName} />
         ) : (
           <Empty description="No material selected." />
         )}

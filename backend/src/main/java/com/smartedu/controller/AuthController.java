@@ -29,9 +29,12 @@ public class AuthController {
      * Handle login with a structured request payload.
      */
     @PostMapping("/login")
-    public Result<Map<String, Object>> login(@RequestBody AuthLoginRequestDto request) {
-        String username = request == null ? null : request.getUsername();
-        String password = request == null ? null : request.getPassword();
+    public Result<Map<String, Object>> login(@RequestBody(required = false) AuthLoginRequestDto request) {
+        if (request == null) {
+            return Result.badRequest("Request body cannot be empty");
+        }
+        String username = request.getUsername();
+        String password = request.getPassword();
 
         if (username == null || username.trim().isEmpty()) {
             return Result.badRequest("Username cannot be empty");
@@ -52,11 +55,14 @@ public class AuthController {
      * Handle register with a structured request payload.
      */
     @PostMapping("/register")
-    public Result<Map<String, Object>> register(@RequestBody AuthRegisterRequestDto request) {
-        String username = request == null ? null : request.getUsername();
-        String password = request == null ? null : request.getPassword();
-        String email = request == null ? null : request.getEmail();
-        String role = request == null ? null : request.getRole();
+    public Result<Map<String, Object>> register(@RequestBody(required = false) AuthRegisterRequestDto request) {
+        if (request == null) {
+            return Result.badRequest("Request body cannot be empty");
+        }
+        String username = request.getUsername();
+        String password = request.getPassword();
+        String email = request.getEmail();
+        String role = request.getRole();
 
         if (username == null || username.trim().isEmpty()) {
             return Result.badRequest("Username cannot be empty");

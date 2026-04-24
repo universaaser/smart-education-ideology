@@ -229,7 +229,7 @@ public class PathRecommendService {
         userMsg.put("content", prompt);
         messages.add(userMsg);
 
-        return aiIntelligenceService.chat(messages,
+        return aiIntelligenceService.chatForTask(AiIntelligenceService.TASK_PATH, messages,
                 "你是一位教育专家，擅长个性化学习路径规划。");
     }
 }

@@ -18,6 +18,11 @@ CREATE TABLE IF NOT EXISTS teaching_material_traces (
     ideology_element VARCHAR(300) NOT NULL COMMENT 'ideology element',
     evidence_snippet VARCHAR(1000) NULL COMMENT 'evidence snippet',
     match_reason VARCHAR(1000) NULL COMMENT 'match reason',
+    resource_title VARCHAR(300) NULL COMMENT 'resource title',
+    resource_source VARCHAR(200) NULL COMMENT 'resource source',
+    resource_source_url VARCHAR(500) NULL COMMENT 'resource source url',
+    resource_quoted_excerpt TEXT NULL COMMENT 'resource quoted excerpt',
+    citation_explanation TEXT NULL COMMENT 'citation explanation',
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'created time',
 
     INDEX idx_tmt_material (material_id),
@@ -26,3 +31,10 @@ CREATE TABLE IF NOT EXISTS teaching_material_traces (
     INDEX idx_tmt_knowledge_name (knowledge_point_name),
     INDEX idx_tmt_ideology (ideology_element)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='teaching material traces';
+
+ALTER TABLE teaching_material_traces
+    ADD COLUMN IF NOT EXISTS resource_title VARCHAR(300) NULL COMMENT 'resource title' AFTER match_reason,
+    ADD COLUMN IF NOT EXISTS resource_source VARCHAR(200) NULL COMMENT 'resource source' AFTER resource_title,
+    ADD COLUMN IF NOT EXISTS resource_source_url VARCHAR(500) NULL COMMENT 'resource source url' AFTER resource_source,
+    ADD COLUMN IF NOT EXISTS resource_quoted_excerpt TEXT NULL COMMENT 'resource quoted excerpt' AFTER resource_source_url,
+    ADD COLUMN IF NOT EXISTS citation_explanation TEXT NULL COMMENT 'citation explanation' AFTER resource_quoted_excerpt;

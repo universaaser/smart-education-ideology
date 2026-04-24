@@ -103,7 +103,7 @@ public class Resource {
     /**
      * 更新时间
      */
-    @TableField(fill = FieldFill.INSERT_UPDATE)
+    // 数据库已配置 ON UPDATE CURRENT_TIMESTAMP，不需要应用层 fill
     private LocalDateTime updatedAt;
 
     /**

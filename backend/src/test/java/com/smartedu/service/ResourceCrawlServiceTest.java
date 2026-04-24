@@ -58,6 +58,17 @@ class ResourceCrawlServiceTest {
         assertEquals("[\"" + TAG_CRAFTSMANSHIP + "\"]", tagsJson);
     }
 
+    @Test
+    void shouldReturnEmptyArrayWhenAiTagsAreEmptyArray() throws Exception {
+        ObjectMapper objectMapper = new ObjectMapper();
+        ResourceCrawlService service = new ResourceCrawlService(List.of(), null, null, null, objectMapper);
+        JsonNode tagNode = objectMapper.readTree("[]");
+
+        String tagsJson = invokeBuildTagsJson(service, tagNode);
+
+        assertEquals("[]", tagsJson);
+    }
+
     private CrawledArticleProcessed invokeFallbackProcess(ResourceCrawlService service, CrawledArticleRaw raw) throws Exception {
         Method method = ResourceCrawlService.class.getDeclaredMethod("fallbackProcess", CrawledArticleRaw.class);
         method.setAccessible(true);

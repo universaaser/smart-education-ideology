@@ -16,6 +16,8 @@ import com.smartedu.mapper.SelectionExplainRecordMapper;
 import com.smartedu.service.AiIntelligenceService;
 import com.smartedu.service.ChatService;
 import com.smartedu.service.KnowledgeRetrievalService;
+import com.smartedu.service.VectorIndexAsyncService;
+import com.smartedu.service.VectorIndexService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.web.servlet.MockMvc;
@@ -131,6 +133,8 @@ class ChatControllerTest {
                             (proxy, method, args) -> null),
                     (AiIntelligenceService) null,
                     (KnowledgeRetrievalService) null,
+                    new VectorIndexService(new ObjectMapper()),
+                    new VectorIndexAsyncService(new VectorIndexService(new ObjectMapper())),
                     new ObjectMapper());
         }
 

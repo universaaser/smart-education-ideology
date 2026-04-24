@@ -75,7 +75,7 @@ class PathRecommendControllerTest {
     private static class StubKnowledgeService extends KnowledgeService {
 
         StubKnowledgeService() {
-            super(null, null, null, null, null);
+            super(null, null, null, null, null, null, null, null, null);
         }
 
         @Override

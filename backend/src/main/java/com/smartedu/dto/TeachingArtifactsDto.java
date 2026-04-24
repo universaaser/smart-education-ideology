@@ -39,9 +39,29 @@ public class TeachingArtifactsDto {
     public static class QuestionDto {
 
         /**
+         * 题型。
+         */
+        private String questionType;
+
+        /**
+         * 难度。
+         */
+        private String difficulty;
+
+        /**
+         * 关联知识点 ID。
+         */
+        private Long knowledgePointId;
+
+        /**
          * 题干。
          */
         private String stem;
+
+        /**
+         * 选项。
+         */
+        private List<String> options = new ArrayList<>();
 
         /**
          * 参考答案。
@@ -52,5 +72,14 @@ public class TeachingArtifactsDto {
          * 评分要点。
          */
         private List<String> scoringPoints = new ArrayList<>();
+
+        public QuestionDto(String stem, String referenceAnswer, List<String> scoringPoints) {
+            this.questionType = "SHORT_ANSWER";
+            this.difficulty = "MEDIUM";
+            this.stem = stem;
+            this.options = new ArrayList<>();
+            this.referenceAnswer = referenceAnswer;
+            this.scoringPoints = scoringPoints == null ? new ArrayList<>() : scoringPoints;
+        }
     }
 }

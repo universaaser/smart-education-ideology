@@ -176,8 +176,10 @@ export const resourceApi = {
 export const knowledgeApi = {
   getGraph: () => get<{ nodes: KnowledgeNodeInfo[]; relations: KnowledgeRelationInfo[] }>('/knowledge/graph'),
   searchNodes: (keyword: string) => get<KnowledgeNodeInfo[]>(`/knowledge/nodes/search?keyword=${keyword}`),
+  createNode: (node: KnowledgeNodeCreateRequest) => post<KnowledgeNodeInfo>('/knowledge/nodes', node),
   updateNodePosition: (id: number, x: number, y: number) =>
     patch<void>(`/knowledge/nodes/${id}/position`, { x, y }),
+  deleteNode: (id: number) => del<void>(`/knowledge/nodes/${id}`),
   createRelation: (fromNodeId: number, toNodeId: number, relationType: string) =>
     post<KnowledgeRelationInfo>('/knowledge/relations', { fromNodeId, toNodeId, relationType }),
 };
@@ -212,6 +214,12 @@ export const uploadApi = {
   getTaskStatus: (taskId: number) => get<UploadTaskInfo>(`/upload/tasks/${taskId}`),
   getTaskResultDetail: (taskId: number) => get<PipelineResultInfo>(`/upload/tasks/${taskId}/result-detail`),
   regenerateTask: (taskId: number) => post<PipelineResultInfo>(`/upload/tasks/${taskId}/regenerate`),
+  getCorrectionDraft: (taskId: number) =>
+    get<ParseTaskCorrectionDraftInfo>(`/upload/tasks/${taskId}/correction-draft`),
+  saveCorrectionDraft: (taskId: number, data: ParseTaskCorrectionSaveRequest) =>
+    put<ParseTaskCorrectionDraftInfo>(`/upload/tasks/${taskId}/correction-draft`, data),
+  reparseTask: (taskId: number) => post<UploadTaskInfo>(`/upload/tasks/${taskId}/reparse`),
+  retryTask: (taskId: number) => post<UploadTaskInfo>(`/upload/tasks/${taskId}/retry`),
   getEditorDraft: (taskId: number) => get<TeachingMaterialDraftInfo>(`/upload/tasks/${taskId}/editor-draft`),
   saveEditorDraft: (taskId: number, data: TeachingMaterialSaveRequest) =>
     put<TeachingMaterialDraftInfo>(`/upload/tasks/${taskId}/editor-draft`, data),
@@ -234,6 +242,24 @@ export const uploadApi = {
     ),
   rollbackMaterialVersion: (taskId: number, materialId: number) =>
     post<TeachingMaterialDraftInfo>(`/upload/tasks/${taskId}/rollback/${materialId}`),
+  /**
+   * 增量拉取任务的 LLM 实时输出。前端按 cursor 不断累加 content。
+   */
+  getLiveLog: (taskId: number, offset: number = 0) =>
+    get<{ content: string; cursor: number; status: string; currentStep?: string }>(
+      `/upload/tasks/${taskId}/live-log${buildQueryString({ offset })}`,
+    ),
+  /**
+   * 解析任务历史列表，userId 可选。
+   */
+  listTasks: (params: { userId?: number; page?: number; size?: number } = {}) =>
+    get<PageResultInfo<ParseTaskListItem>>(
+      `/upload/tasks${buildQueryString({
+        userId: params.userId,
+        page: params.page,
+        size: params.size,
+      })}`,
+    ),
 };
 
 export const materialApi = {
@@ -498,6 +524,19 @@ export interface KnowledgeNodeInfo {
   description: string;
 }
 
+export interface KnowledgeNodeCreateRequest {
+  name: string;
+  category?: string;
+  technicalDefinition?: string;
+  ideologicalValue?: string;
+  subject?: string;
+  icon?: string;
+  subTitle?: string;
+  nodeSize?: string;
+  positionX?: number;
+  positionY?: number;
+}
+
 export interface KnowledgeRelationInfo {
   id: number;
   fromNodeId: number;
@@ -519,12 +558,84 @@ export interface UploadTaskInfo {
   courseId?: number;
 }
 
+/**
+ * 解析任务列表项：用于历史解析记录面板。
+ */
+export interface ParseTaskListItem {
+  taskId: number;
+  fileName: string;
+  status: string;
+  progress?: number;
+  currentStep?: string;
+  courseId?: number | null;
+  parseMode?: 'MINERU' | 'FALLBACK_LLM' | 'REGENERATE' | string;
+  createdAt?: string;
+  completedAt?: string;
+  errorMessage?: string;
+}
+
 export interface DocumentStructureInfo {
   title: string;
   documentType: 'TEXTBOOK' | 'OUTLINE' | 'PAPER' | 'UNKNOWN' | string;
   overview: string;
   chapterOutline: string[];
   teachingFocus: string[];
+  // MinerU 接入后透出的原始 markdown，以及当前任务使用的解析模式标识。
+  rawMarkdown?: string;
+  parseMode?: 'MINERU' | 'FALLBACK_LLM' | 'REGENERATE' | string;
+  // MinerU 全量结构化结果（大纲 / 分块 / 表格 / 图片 / 公式）。
+  mineruContent?: MineruStructuredContentInfo;
+}
+
+export interface MineruContentBlockInfo {
+  index: number;
+  type: 'text' | 'image' | 'table' | 'equation' | 'chart' | 'list' | 'code'
+    | 'header' | 'footer' | 'page_number' | 'aside_text' | 'page_footnote' | string;
+  text?: string;
+  textLevel?: number;
+  imageUrl?: string;
+  imagePath?: string;
+  imageCaption?: string[];
+  imageFootnote?: string[];
+  tableCaption?: string[];
+  tableFootnote?: string[];
+  tableBody?: string;
+  textFormat?: string;
+  pageIdx?: number;
+  bbox?: number[];
+  subType?: string;
+}
+
+export interface MineruOutlineNodeInfo {
+  title: string;
+  level: number;
+  blockIndex: number;
+  pageIdx: number;
+  children: MineruOutlineNodeInfo[];
+}
+
+export interface MineruStatsInfo {
+  pageCount: number;
+  headingCount: number;
+  paragraphCount: number;
+  imageCount: number;
+  tableCount: number;
+  equationCount: number;
+  listCount: number;
+  codeCount: number;
+  wordCount: number;
+}
+
+export interface MineruStructuredContentInfo {
+  batchId?: string;
+  modelVersion?: string;
+  assetBaseUrl?: string;
+  blocks: MineruContentBlockInfo[];
+  outline: MineruOutlineNodeInfo[];
+  stats?: MineruStatsInfo;
+  images: MineruContentBlockInfo[];
+  tables: MineruContentBlockInfo[];
+  equations: MineruContentBlockInfo[];
 }
 
 export interface PipelineKnowledgePointInfo {
@@ -543,7 +654,11 @@ export interface IdeologyMatchInfo {
 }
 
 export interface TeachingQuestionInfo {
+  questionType?: 'SINGLE_CHOICE' | 'MULTIPLE_CHOICE' | 'SHORT_ANSWER' | 'CASE_ANALYSIS' | string;
+  difficulty?: 'EASY' | 'MEDIUM' | 'HARD' | string;
+  knowledgePointId?: number | null;
   stem: string;
+  options?: string[];
   referenceAnswer: string;
   scoringPoints: string[];
 }
@@ -563,6 +678,16 @@ export interface PipelineResultInfo {
   inferred: boolean;
   schemaVersion: string;
 }
+
+export interface ParseTaskCorrectionDraftInfo {
+  source: 'PIPELINE' | 'CORRECTION' | string;
+  stale: boolean;
+  savedAt?: string;
+  sourceCompletedAt?: string;
+  result: PipelineResultInfo;
+}
+
+export type ParseTaskCorrectionSaveRequest = PipelineResultInfo;
 
 export interface TeachingTraceItemInfo {
   parseTaskId: number;
@@ -676,3 +801,27 @@ export interface ExcelImportResult {
   /** 导入校验或执行过程中产生的警告信息 */
   warnings: string[];
 }
+
+/** Phase 3A: semantic search request */
+export interface SemanticSearchRequest {
+  scope: 'knowledge_points' | 'ideology_matches' | 'selection_explain';
+  text: string;
+  topK?: number;
+  courseId?: number | null;
+}
+
+/** Phase 3A: semantic search hit */
+export interface SemanticHit {
+  id: string;
+  score: number;
+  title: string;
+  snippet: string;
+  sourceType: string;
+  sourceId?: number | null;
+}
+
+/** Phase 3A: semantic search API */
+export const semanticApi = {
+  search: (data: SemanticSearchRequest) =>
+    post<SemanticHit[]>('/semantic/search', data),
+};

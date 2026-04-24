@@ -4,6 +4,9 @@ import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.util.ArrayList;
+import java.util.List;
+
 /**
  * 知识点结构化对象。
  */
@@ -36,4 +39,9 @@ public class KnowledgePointDto {
      * 证据片段，用于后续可追溯展示。
      */
     private String evidenceSnippet;
+
+    /**
+     * 来自爬虫资源的补充引用。
+     */
+    private List<ResourceCitationDto> resourceCitations = new ArrayList<>();
 }

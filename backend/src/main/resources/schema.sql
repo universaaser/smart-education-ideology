@@ -379,18 +379,64 @@ CREATE TABLE parse_tasks (
     status ENUM('PENDING', 'UPLOADING', 'PARSING', 'ANALYZING', 'COMPLETED', 'FAILED') DEFAULT 'PENDING' COMMENT '任务状态',
     progress INT DEFAULT 0 COMMENT '处理进度（百分比）',
     current_step VARCHAR(200) COMMENT '当前处理步骤描述',
-    parsed_content TEXT COMMENT 'MinerU解析后的结构化文本',
-    ai_analysis TEXT COMMENT 'AI分析结果（思政融合建议）',
-    error_message VARCHAR(500) COMMENT '错误信息',
+    parsed_content JSON COMMENT 'MinerU解析后的结构化文本',
+    ai_analysis JSON COMMENT 'AI分析结果（思政融合建议）',
+    error_message VARCHAR(1000) COMMENT '错误摘要（完整栈走应用日志）',
     started_at DATETIME COMMENT '开始处理时间',
     completed_at DATETIME COMMENT '完成时间',
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-    
+    gen_doc_title VARCHAR(300) GENERATED ALWAYS AS
+        (JSON_UNQUOTE(JSON_EXTRACT(parsed_content, '$.title'))) VIRTUAL COMMENT '文档标题（来自 parsed_content.title）',
+
     INDEX idx_user (user_id),
     INDEX idx_status (status),
-    INDEX idx_created_at (created_at)
+    INDEX idx_created_at (created_at),
+    INDEX idx_gen_doc_title (gen_doc_title)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='文档解析任务表';
+
+-- =====================================================
+-- 9.1 解析任务知识点投影表 (parse_task_knowledge_points)
+-- 说明：将 LLM pipeline 的知识点结果拉平到关系表，便于原生 SQL 索引与聚合
+-- =====================================================
+DROP TABLE IF EXISTS parse_task_knowledge_points;
+CREATE TABLE parse_task_knowledge_points (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '投影行ID',
+    parse_task_id BIGINT NOT NULL COMMENT '关联解析任务ID',
+    course_id BIGINT NULL COMMENT '可选课程绑定ID',
+    point_name VARCHAR(200) NOT NULL COMMENT '知识点名称',
+    definition TEXT COMMENT '知识点定义',
+    chapter VARCHAR(200) COMMENT '所属章节',
+    evidence_snippet TEXT COMMENT '文档中的证据片段',
+    resource_citations_json TEXT COMMENT '资源引用列表JSON',
+    pipeline_version VARCHAR(20) DEFAULT 'v1' COMMENT 'Pipeline schema 版本',
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+
+    INDEX idx_ptkp_task (parse_task_id),
+    INDEX idx_ptkp_course_point (course_id, point_name),
+    FULLTEXT INDEX ft_ptkp_def (point_name, definition, evidence_snippet)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='解析任务知识点投影表';
+
+-- =====================================================
+-- 9.2 解析任务思政匹配投影表 (parse_task_ideology_matches)
+-- 说明：将 LLM pipeline 的思政匹配结果拉平到关系表
+-- =====================================================
+DROP TABLE IF EXISTS parse_task_ideology_matches;
+CREATE TABLE parse_task_ideology_matches (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '投影行ID',
+    parse_task_id BIGINT NOT NULL COMMENT '关联解析任务ID',
+    knowledge_point_name VARCHAR(200) NOT NULL COMMENT '知识点名称',
+    ideology_element VARCHAR(120) NOT NULL COMMENT '匹配到的思政元素',
+    match_reason TEXT COMMENT '匹配理由',
+    citation_explanation TEXT COMMENT '引用解释',
+    resource_citations_json TEXT COMMENT '资源引用列表JSON',
+    pipeline_version VARCHAR(20) DEFAULT 'v1' COMMENT 'Pipeline schema 版本',
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+
+    INDEX idx_ptim_task (parse_task_id),
+    INDEX idx_ptim_ideology (ideology_element),
+    FULLTEXT INDEX ft_ptim_reason (match_reason)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='解析任务思政匹配投影表';
 
 -- =====================================================
 -- 10. 系统动态表 (system_activities)
@@ -626,3 +672,20 @@ FROM subject_knowledge
 WHERE deleted = 0
   AND COALESCE(NULLIF(summary, ''), ideology_summary) IS NOT NULL;
 
+-- =====================================================
+-- parse_task_corrections
+-- Purpose: keep the latest manual correction snapshot for each parse task
+-- =====================================================
+DROP TABLE IF EXISTS parse_task_corrections;
+CREATE TABLE parse_task_corrections (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT 'correction snapshot id',
+    parse_task_id BIGINT NOT NULL COMMENT 'related parse task id',
+    corrected_result_json JSON NOT NULL COMMENT 'latest corrected structured result json',
+    source_completed_at DATETIME NULL COMMENT 'parse task completed_at used as correction source baseline',
+    status VARCHAR(32) NOT NULL DEFAULT 'ACTIVE' COMMENT 'ACTIVE or STALE',
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'created time',
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT 'updated time',
+
+    UNIQUE KEY uk_ptc_task (parse_task_id),
+    INDEX idx_ptc_status (status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='parse task correction snapshots';

@@ -14,6 +14,7 @@ import com.smartedu.dto.SelectionExplainEvidenceDto;
 import com.smartedu.dto.SelectionExplainHistoryDto;
 import com.smartedu.dto.SelectionExplainRequestDto;
 import com.smartedu.dto.SelectionExplainResponse;
+import com.smartedu.dto.SemanticHitDto;
 import com.smartedu.entity.ChatMessage;
 import com.smartedu.entity.ChatSession;
 import com.smartedu.entity.SelectionExplainRecord;
@@ -27,6 +28,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -45,6 +47,8 @@ public class ChatService {
     private final SelectionExplainRecordMapper selectionExplainRecordMapper;
     private final AiIntelligenceService aiIntelligenceService;
     private final KnowledgeRetrievalService knowledgeRetrievalService;
+    private final VectorIndexService vectorIndexService;
+    private final VectorIndexAsyncService vectorIndexAsyncService;
     private final ObjectMapper objectMapper;
 
     /**
@@ -111,7 +115,7 @@ public class ChatService {
                 })
                 .collect(Collectors.toList());
 
-        KnowledgeRetrievalResult retrievalResult = knowledgeRetrievalService.retrieveWithStatus(userMessage, 5);
+        KnowledgeRetrievalResult retrievalResult = retrieveChatContext(userMessage, 5);
         String systemPrompt = buildPromptWithKnowledgeContext(retrievalResult);
         String providerKey = session.getAiModel();
         String aiResponse = aiIntelligenceService.chat(messages, systemPrompt, providerKey);
@@ -136,6 +140,69 @@ public class ChatService {
                 aiMsg,
                 retrievalResult.getContexts().stream().map(this::toChatCitation).collect(Collectors.toList()),
                 retrievalResult.getRetrievalStatus());
+    }
+
+    private KnowledgeRetrievalResult retrieveChatContext(String userMessage, int limit) {
+        List<KnowledgeContextItem> vectorContexts = retrieveVectorContexts(userMessage, limit);
+        if (!vectorContexts.isEmpty()) {
+            return new KnowledgeRetrievalResult(KnowledgeRetrievalService.STATUS_FOUND, vectorContexts);
+        }
+        return knowledgeRetrievalService.retrieveWithStatus(userMessage, limit);
+    }
+
+    private List<KnowledgeContextItem> retrieveVectorContexts(String query, int limit) {
+        List<KnowledgeContextItem> contexts = new ArrayList<>();
+        contexts.addAll(searchVectorScope("knowledge_points", query, limit));
+        if (contexts.size() < limit) {
+            contexts.addAll(searchVectorScope("ideology_matches", query, limit - contexts.size()));
+        }
+        return deduplicateContexts(contexts).stream()
+                .limit(Math.max(limit, 0))
+                .collect(Collectors.toList());
+    }
+
+    private List<KnowledgeContextItem> searchVectorScope(String scope, String query, int limit) {
+        if (limit <= 0) {
+            return List.of();
+        }
+        String collection = vectorIndexService.resolveCollection(scope);
+        return vectorIndexService.search(collection, query, limit, null).stream()
+                .map(hit -> toVectorContext(hit, scope))
+                .collect(Collectors.toList());
+    }
+
+    private List<KnowledgeContextItem> deduplicateContexts(List<KnowledgeContextItem> contexts) {
+        Map<String, KnowledgeContextItem> unique = new LinkedHashMap<>();
+        for (KnowledgeContextItem context : contexts) {
+            String key = safe(context.getItemType()) + ":" + context.getReferenceId() + ":"
+                    + safe(context.getTitle()) + ":" + safe(context.getSnippet());
+            unique.putIfAbsent(key, context);
+        }
+        return new ArrayList<>(unique.values());
+    }
+
+    private KnowledgeContextItem toVectorContext(SemanticHitDto hit, String scope) {
+        KnowledgeContextItem item = new KnowledgeContextItem(
+                resolveVectorItemType(hit, scope),
+                hit.getSourceId(),
+                safe(hit.getTitle()),
+                safe(hit.getSnippet()),
+                safe(hit.getSource()),
+                safe(hit.getSourceUrl()),
+                scope);
+        item.setSnippet(truncate(safe(hit.getSnippet()), 260));
+        item.setMatchedBy("VECTOR");
+        item.setScore(hit.getScore());
+        return item;
+    }
+
+    private String resolveVectorItemType(SemanticHitDto hit, String scope) {
+        return switch (safe(hit.getSourceType())) {
+            case "parse_task_knowledge_point" -> "KNOWLEDGE_POINT";
+            case "parse_task_ideology_match" -> "IDEOLOGY_MATCH";
+            case "selection_explain_record" -> "SELECTION_EXPLAIN";
+            default -> scope.toUpperCase();
+        };
     }
 
     /**
@@ -254,6 +321,7 @@ public class ChatService {
         record.setHasReliableEvidence(hasReliableEvidence ? 1 : 0);
         record.setCreatedAt(LocalDateTime.now());
         selectionExplainRecordMapper.insert(record);
+        vectorIndexAsyncService.indexSelectionExplainRecord(record);
 
         SelectionExplainResponse response = new SelectionExplainResponse();
         response.setRecordId(record.getId());

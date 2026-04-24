@@ -9,6 +9,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -43,14 +44,24 @@ class KnowledgeControllerTest {
         assertEquals(18.75D, knowledgeService.lastY);
     }
 
+    @Test
+    void shouldDeleteNodeById() throws Exception {
+        mockMvc.perform(delete("/api/knowledge/nodes/15"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200));
+
+        assertEquals(15L, knowledgeService.deletedNodeId);
+    }
+
     private static class StubKnowledgeService extends KnowledgeService {
 
         private Long lastNodeId;
         private Double lastX;
         private Double lastY;
+        private Long deletedNodeId;
 
         StubKnowledgeService() {
-            super(null, null, null, null, null);
+            super(null, null, null, null, null, null, null, null, null);
         }
 
         @Override
@@ -58,6 +69,11 @@ class KnowledgeControllerTest {
             lastNodeId = id;
             lastX = x;
             lastY = y;
+        }
+
+        @Override
+        public void deleteNode(Long id) {
+            deletedNodeId = id;
         }
     }
 

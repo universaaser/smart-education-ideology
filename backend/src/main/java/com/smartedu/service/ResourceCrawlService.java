@@ -324,7 +324,7 @@ public class ResourceCrawlService {
             userMsg.put("content", userPrompt);
             messages.add(userMsg);
 
-            String aiResponse = aiIntelligenceService.chat(messages, systemPrompt);
+            String aiResponse = aiIntelligenceService.chatForTask(AiIntelligenceService.TASK_CRAWL, messages, systemPrompt);
             return parseAiResponse(raw, aiResponse);
 
         } catch (Exception e) {
@@ -355,18 +355,6 @@ public class ResourceCrawlService {
     }
 
     private CrawledArticleProcessed fallbackProcess(CrawledArticleRaw raw) {
-        List<String> fallbackTags = new ArrayList<>();
-        fallbackTags.add("工匠精神");
-        fallbackTags.add("责任担当");
-
-        String tagsJson;
-        try {
-            tagsJson = objectMapper.writeValueAsString(fallbackTags);
-        } catch (JsonProcessingException e) {
-            tagsJson = "[\"工匠精神\",\"责任担当\"]";
-        }
-
-        tagsJson = EMPTY_TAGS_JSON;
         String fallbackSummary = buildStoredSummary(raw.getTitle(), "", buildExcerpt(raw.getContent()));
 
         return new CrawledArticleProcessed(
@@ -375,7 +363,7 @@ public class ResourceCrawlService {
                 raw.getSourceUrl(),
                 fallbackSummary,
                 "",
-                tagsJson,
+                EMPTY_TAGS_JSON,
                 false);
     }
 
@@ -402,11 +390,6 @@ public class ResourceCrawlService {
             }
         }
 
-        if (false && tags.isEmpty()) {
-            tags.add("工匠精神");
-            tags.add("责任担当");
-        }
-
         List<String> finalTags = tags.stream()
                 .map(this::canonicalizeIdeologyTag)
                 .filter(tag -> !tag.isBlank())
@@ -415,10 +398,6 @@ public class ResourceCrawlService {
 
         if (finalTags.isEmpty()) {
             return EMPTY_TAGS_JSON;
-        }
-
-        if (finalTags.isEmpty()) {
-            return "[\"工匠精神\"]";
         }
         return objectMapper.writeValueAsString(finalTags);
     }
@@ -854,5 +833,6 @@ public class ResourceCrawlService {
         crawlExecutor.shutdownNow();
     }
 }
+
 
 

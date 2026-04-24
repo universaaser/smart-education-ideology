@@ -37,5 +37,15 @@ public class TeachingMaterialTrace {
 
     private String matchReason;
 
+    private String resourceTitle;
+
+    private String resourceSource;
+
+    private String resourceSourceUrl;
+
+    private String resourceQuotedExcerpt;
+
+    private String citationExplanation;
+
     private LocalDateTime createdAt;
 }
