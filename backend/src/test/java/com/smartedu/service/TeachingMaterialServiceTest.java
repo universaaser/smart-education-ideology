@@ -14,6 +14,7 @@ import com.smartedu.entity.CourseMaterialRule;
 import com.smartedu.entity.ParseTask;
 import com.smartedu.entity.SubjectKnowledge;
 import com.smartedu.entity.TeachingMaterial;
+import com.smartedu.entity.TeachingMaterialTrace;
 import com.smartedu.mapper.CourseMaterialRuleMapper;
 import com.smartedu.mapper.ParseTaskCorrectionMapper;
 import com.smartedu.mapper.ParseTaskIdeologyMatchMapper;
@@ -107,6 +108,77 @@ class TeachingMaterialServiceTest {
 
         TeachingMaterialDraftDto draft = localService.getEditorDraft(1L);
         assertEquals(88L, draft.getTraceItems().get(0).getKnowledgePointId());
+    }
+
+    @Test
+    void shouldSaveDraftFromEmptyRequest() {
+        TeachingMaterialDraftDto draft = teachingMaterialService.saveDraft(1L, null);
+
+        assertNotNull(draft.getMaterialId());
+        assertEquals("iot-outline.docx", draft.getTitle());
+        assertEquals("", draft.getLectureNotes());
+        assertTrue(draft.getCases().isEmpty());
+        assertTrue(draft.getQuestions().isEmpty());
+        assertEquals("DRAFT", draft.getStatus());
+    }
+
+    @Test
+    void shouldPublishFromEmptyRequest() {
+        TeachingMaterialViewDto saved = teachingMaterialService.savePublishedVersion(1L, null);
+
+        assertNotNull(saved.getMaterialId());
+        assertEquals("iot-outline.docx", saved.getTitle());
+        assertEquals("PUBLISHED", saved.getStatus());
+        assertTrue(saved.getCases().isEmpty());
+        assertTrue(saved.getQuestions().isEmpty());
+    }
+
+    @Test
+    void shouldRejectSaveWhenTaskUserIsMissing() {
+        Map<Long, ParseTask> parseTasks = new HashMap<>();
+        ParseTask parseTask = buildParseTask(1L, "missing-user.docx");
+        parseTask.setUserId(null);
+        parseTasks.put(1L, parseTask);
+
+        TeachingMaterialService localService = new TeachingMaterialService(
+                buildTeachingMaterialMapper(store),
+                buildCourseMaterialRuleMapper(null),
+                buildParseTaskMapper(parseTasks),
+                buildSubjectKnowledgeMapper(),
+                buildAiServiceStub(buildPipelineResult()),
+                buildCorrectionServiceStub(),
+                buildTeachingMaterialTraceMapper(),
+                new ObjectMapper()
+        );
+
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+                () -> localService.saveDraft(1L, new TeachingMaterialSaveRequestDto()));
+        assertEquals("Task user id is required before saving teaching material", ex.getMessage());
+    }
+
+    @Test
+    void shouldSkipInvalidTraceRowsWhenSavingDraft() {
+        PipelineResultDto pipeline = buildPipelineResult();
+        IdeologyMatchDto invalid = new IdeologyMatchDto();
+        invalid.setKnowledgePointName(" ");
+        invalid.setIdeologyElement("Cyber Responsibility");
+        pipeline.setIdeologyMatches(List.of(invalid));
+
+        TeachingMaterialService localService = new TeachingMaterialService(
+                buildTeachingMaterialMapper(store),
+                buildCourseMaterialRuleMapper(null),
+                buildParseTaskMapper(Map.of(1L, buildParseTask(1L, "iot-outline.docx"))),
+                buildSubjectKnowledgeMapper(),
+                buildAiServiceStub(pipeline),
+                buildCorrectionServiceStub(),
+                buildTeachingMaterialTraceMapper(),
+                new ObjectMapper()
+        );
+
+        TeachingMaterialDraftDto draft = localService.saveDraft(1L, new TeachingMaterialSaveRequestDto());
+
+        assertNotNull(draft.getMaterialId());
+        assertEquals(1, draft.getTraceItems().size());
     }
 
     @Test
@@ -723,6 +795,13 @@ class TeachingMaterialServiceTest {
                 (proxy, method, args) -> {
                     if ("selectCount".equals(method.getName())) {
                         return 0L;
+                    }
+                    if ("insert".equals(method.getName()) && args[0] instanceof TeachingMaterialTrace trace) {
+                        if (trace.getKnowledgePointName() == null || trace.getKnowledgePointName().isBlank()
+                                || trace.getIdeologyElement() == null || trace.getIdeologyElement().isBlank()) {
+                            throw new IllegalArgumentException("trace required fields are blank");
+                        }
+                        return 1;
                     }
                     if (method.getReturnType().equals(boolean.class)) {
                         return false;

@@ -32,6 +32,16 @@ public class ResourceService {
      */
     public List<Resource> getAllResources() {
         LambdaQueryWrapper<Resource> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(Resource::getReviewStatus, "APPROVED")
+                .orderByDesc(Resource::getCreatedAt);
+        return resourceMapper.selectList(wrapper);
+    }
+
+    public List<Resource> getReviewResources(String reviewStatus) {
+        LambdaQueryWrapper<Resource> wrapper = new LambdaQueryWrapper<>();
+        if (reviewStatus != null && !reviewStatus.isBlank()) {
+            wrapper.eq(Resource::getReviewStatus, reviewStatus);
+        }
         wrapper.orderByDesc(Resource::getCreatedAt);
         return resourceMapper.selectList(wrapper);
     }
@@ -49,6 +59,8 @@ public class ResourceService {
         LambdaQueryWrapper<Resource> wrapper = new LambdaQueryWrapper<>();
 
         // 分类筛选
+        wrapper.eq(Resource::getReviewStatus, "APPROVED");
+
         if (category != null && !category.isEmpty() && !"全部".equals(category)) {
             wrapper.eq(Resource::getCategory, category);
         }
@@ -120,6 +132,7 @@ public class ResourceService {
     public List<Resource> searchForChatContext(String keyword, int limit) {
         int safeLimit = Math.max(1, Math.min(limit, 8));
         LambdaQueryWrapper<Resource> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(Resource::getReviewStatus, "APPROVED");
 
         List<String> searchTerms = tokenize(keyword);
         if (!searchTerms.isEmpty()) {
@@ -180,6 +193,9 @@ public class ResourceService {
         if (resource.getSyncStatus() == null) {
             resource.setSyncStatus("PENDING");
         }
+        if (resource.getReviewStatus() == null) {
+            resource.setReviewStatus("PENDING");
+        }
         resourceMapper.insert(resource);
         knowledgeChunkService.refreshResourceChunks(resource);
         return resource;
@@ -214,6 +230,23 @@ public class ResourceService {
         wrapper.eq(Resource::getSyncStatus, status);
         wrapper.orderByDesc(Resource::getCreatedAt);
         return resourceMapper.selectList(wrapper);
+    }
+
+    @Transactional
+    public Resource updateReviewStatus(Long id, String reviewStatus, Long reviewerId) {
+        if (!List.of("PENDING", "APPROVED", "REJECTED").contains(reviewStatus)) {
+            throw new IllegalArgumentException("Invalid review status");
+        }
+        Resource resource = resourceMapper.selectById(id);
+        if (resource == null) {
+            return null;
+        }
+        resource.setReviewStatus(reviewStatus);
+        resource.setReviewedBy(reviewerId);
+        resource.setReviewedAt(LocalDateTime.now());
+        resource.setUpdatedAt(LocalDateTime.now());
+        resourceMapper.updateById(resource);
+        return resourceMapper.selectById(id);
     }
 
     /**

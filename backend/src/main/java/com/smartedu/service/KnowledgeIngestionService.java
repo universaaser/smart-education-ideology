@@ -43,6 +43,9 @@ public class KnowledgeIngestionService {
 
     private static final String SOURCE_TYPE_CRAWLED = "CRAWLED_RESOURCE";
     private static final String SOURCE_TYPE_UPLOADED = "UPLOADED_DOCUMENT";
+    private static final double GRAPH_GRID_X = 240D;
+    private static final double GRAPH_GRID_Y = 180D;
+    private static final double NODE_LABEL_LINE_HEIGHT = 16D;
 
     private final ResourceService resourceService;
     private final SubjectKnowledgeMapper subjectKnowledgeMapper;
@@ -272,6 +275,7 @@ public class KnowledgeIngestionService {
             match.setIsPrimary(index == 0 ? 1 : 0);
             match.setMatchScore(BigDecimal.valueOf(index == 0 ? 95.00 : 80.00));
             match.setMatchReason(truncate(firstNonBlank(matchReason, ideology.getDescription()), 1000));
+            match.setReviewStatus("APPROVED");
             if (match.getId() == null) {
                 subjectIdeologyMatchMapper.insert(match);
             } else {
@@ -369,10 +373,121 @@ public class KnowledgeIngestionService {
     }
 
     private void applyDefaultPosition(SubjectKnowledge subjectKnowledge) {
-        long count = subjectKnowledgeMapper.selectCount(null);
-        int index = (int) count;
-        subjectKnowledge.setPositionX(((index % 5) - 2) * 180.0);
-        subjectKnowledge.setPositionY(((index / 5) - 1) * 140.0);
+        List<SubjectKnowledge> existingNodes = subjectKnowledgeMapper.selectList(new LambdaQueryWrapper<>());
+        for (int layer = 0; layer <= 12; layer++) {
+            for (GraphPosition candidate : buildCandidatePositions(layer)) {
+                if (!hasNodeOverlap(candidate, subjectKnowledge.getName(), subjectKnowledge.getNodeSize(), existingNodes)) {
+                    subjectKnowledge.setPositionX(candidate.x);
+                    subjectKnowledge.setPositionY(candidate.y);
+                    return;
+                }
+            }
+        }
+
+        double fallbackY = existingNodes.stream()
+                .map(SubjectKnowledge::getPositionY)
+                .filter(value -> value != null)
+                .max(Double::compareTo)
+                .orElse(0D) + GRAPH_GRID_Y;
+        subjectKnowledge.setPositionX(0D);
+        subjectKnowledge.setPositionY(fallbackY);
+    }
+
+    private List<GraphPosition> buildCandidatePositions(int layer) {
+        List<GraphPosition> candidates = new ArrayList<>();
+        if (layer == 0) {
+            candidates.add(new GraphPosition(0D, 0D));
+            return candidates;
+        }
+
+        for (int x = -layer; x <= layer; x++) {
+            candidates.add(new GraphPosition(x * GRAPH_GRID_X, -layer * GRAPH_GRID_Y));
+            candidates.add(new GraphPosition(x * GRAPH_GRID_X, layer * GRAPH_GRID_Y));
+        }
+        for (int y = -layer + 1; y <= layer - 1; y++) {
+            candidates.add(new GraphPosition(-layer * GRAPH_GRID_X, y * GRAPH_GRID_Y));
+            candidates.add(new GraphPosition(layer * GRAPH_GRID_X, y * GRAPH_GRID_Y));
+        }
+        return candidates;
+    }
+
+    private boolean hasNodeOverlap(
+            GraphPosition candidate,
+            String candidateName,
+            String candidateNodeSize,
+            List<SubjectKnowledge> existingNodes) {
+        double candidateWidth = estimateNodeFootprintWidth(candidateName, candidateNodeSize);
+        double candidateHeight = estimateNodeFootprintHeight(candidateName, candidateNodeSize);
+        for (SubjectKnowledge existingNode : existingNodes) {
+            double existingWidth = estimateNodeFootprintWidth(existingNode.getName(), existingNode.getNodeSize());
+            double existingHeight = estimateNodeFootprintHeight(existingNode.getName(), existingNode.getNodeSize());
+            double existingX = existingNode.getPositionX() == null ? 0D : existingNode.getPositionX();
+            double existingY = existingNode.getPositionY() == null ? 0D : existingNode.getPositionY();
+            boolean xOverlap = Math.abs(candidate.x - existingX) < ((candidateWidth + existingWidth) / 2D);
+            boolean yOverlap = Math.abs(candidate.y - existingY) < ((candidateHeight + existingHeight) / 2D);
+            if (xOverlap && yOverlap) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private double estimateNodeFootprintWidth(String nodeName, String nodeSize) {
+        double nodePixelSize = resolveNodePixelSize(nodeSize);
+        double labelWidth = Math.max(90D, resolveLabelMaxChars(nodeSize) * 16D);
+        return Math.max(nodePixelSize + 48D, labelWidth);
+    }
+
+    private double estimateNodeFootprintHeight(String nodeName, String nodeSize) {
+        double nodePixelSize = resolveNodePixelSize(nodeSize);
+        int lineCount = Math.max(1, estimateLineCount(nodeName, nodeSize));
+        return nodePixelSize + 48D + (lineCount * NODE_LABEL_LINE_HEIGHT);
+    }
+
+    private int estimateLineCount(String nodeName, String nodeSize) {
+        String normalizedName = nodeName == null ? "" : nodeName.trim();
+        if (normalizedName.isBlank()) {
+            return 1;
+        }
+        int charsPerLine = resolveLabelMaxChars(nodeSize);
+        return (int) Math.ceil((double) normalizedName.length() / charsPerLine);
+    }
+
+    private int resolveLabelMaxChars(String nodeSize) {
+        return switch (normalizeNodeSize(nodeSize)) {
+            case "SM" -> 6;
+            case "LG" -> 10;
+            default -> 8;
+        };
+    }
+
+    private double resolveNodePixelSize(String nodeSize) {
+        return switch (normalizeNodeSize(nodeSize)) {
+            case "SM" -> 96D;
+            case "LG" -> 144D;
+            default -> 120D;
+        };
+    }
+
+    private String normalizeNodeSize(String nodeSize) {
+        if (nodeSize == null || nodeSize.isBlank()) {
+            return "MD";
+        }
+        String normalized = nodeSize.trim().toUpperCase();
+        if ("SM".equals(normalized) || "LG".equals(normalized)) {
+            return normalized;
+        }
+        return "MD";
+    }
+
+    private static final class GraphPosition {
+        private final double x;
+        private final double y;
+
+        private GraphPosition(double x, double y) {
+            this.x = x;
+            this.y = y;
+        }
     }
 
     private String extractSubjectName(Resource resource) {

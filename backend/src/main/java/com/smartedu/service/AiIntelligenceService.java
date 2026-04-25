@@ -1054,31 +1054,24 @@ public class AiIntelligenceService {
                         + (mineruStructured != null && mineruStructured.getStats() != null
                                 ? " pages=" + mineruStructured.getStats().getPageCount()
                                 : ""));
-                // 立刻把 markdown 写入 parsedContent，前端“Parsed Content Summary”可直接渲染。
-                task.setParsedContent(rawMarkdown);
+                task.setParsedContent(writeParsedContentJson(fileName, rawMarkdown, parseMode));
                 task.setUpdatedAt(LocalDateTime.now());
                 parseTaskMapper.updateById(task);
             } else {
                 rawContent = readFileContent(task.getFilePath());
                 parseMode = "FALLBACK_LLM";
                 aiStreamBuffer.appendStage("mineru-parse unavailable, fallback to text extractor");
-                // 回退路径同样把可读原文落 parsedContent，避免前端看到上一次遗留内容。
                 if (rawContent != null && !rawContent.isBlank()) {
-                    task.setParsedContent(rawContent);
+                    rawMarkdown = rawContent;
+                    task.setParsedContent(writeParsedContentJson(fileName, rawMarkdown, parseMode));
                     task.setUpdatedAt(LocalDateTime.now());
                     parseTaskMapper.updateById(task);
                 }
             }
         } else {
-            // regenerate 场景：parsedContent 现在可能是 markdown/纯文本，不再是结构化 JSON；
-            // 直接当作原文交给 LLM 阶段，无需反序列化。
-            rawContent = task.getParsedContent();
             parseMode = "REGENERATE";
             rawMarkdown = extractExistingRawMarkdown(task);
-            if (rawContent == null || rawContent.isBlank()) {
-                // 兜底：旧任务 parsedContent 可能是结构化 JSON，从 aiAnalysis 结构里把 markdown/概要捞出来。
-                rawContent = rawMarkdown;
-            }
+            rawContent = rawMarkdown;
             warnings.add("Document structure rebuilt from existing parsed content for regenerate.");
         }
 
@@ -1156,16 +1149,16 @@ public class AiIntelligenceService {
         pipelineResult.setInferred(inferred);
         pipelineResult.setSchemaVersion(schemaVersion);
 
+        task.setParsedContent(writeJsonSafely(structure));
         task.setAiAnalysis(writeJsonSafely(pipelineResult));
         task.setUpdatedAt(LocalDateTime.now());
         parseTaskMapper.updateById(task);
         persistPipelineProjections(task, pipelineResult);
         vectorIndexAsyncService.indexPipelineResult(task, pipelineResult);
 
-        // P1: 只有真正跑出非兜底结果才写入主题知识库/资源库，避免 stub 数据污染图谱。
+        // Uploaded document parse results stay in parse task, projection and vector index storage only.
         if (!inferred) {
-            updateTaskProgress(task, "ANALYZING", 90, "Syncing knowledge points and sources...");
-            knowledgeIngestionService.ingestParseTask(task);
+            updateTaskProgress(task, "ANALYZING", 90, "Finalizing parsed outputs...");
 
             task.setStatus("COMPLETED");
             task.setProgress(100);
@@ -1183,9 +1176,7 @@ public class AiIntelligenceService {
             for (int i = 1; i < pipelineAttempts; i++) {
                 PipelineResultDto retryResult = tryRebuildFromParsedContent(task, structure, rawContent, courseContext);
                 if (!retryResult.isInferred()) {
-                    // 重试成功：补做一次入库并把任务置为 COMPLETED。
-                    updateTaskProgress(task, "ANALYZING", 90, "Syncing knowledge points and sources...");
-                    knowledgeIngestionService.ingestParseTask(task);
+                    updateTaskProgress(task, "ANALYZING", 90, "Finalizing parsed outputs...");
                     task.setStatus("COMPLETED");
                     task.setProgress(100);
                     task.setCurrentStep("Completed");
@@ -1227,6 +1218,7 @@ public class AiIntelligenceService {
         pipelineResult.setInferred(inferred);
         pipelineResult.setSchemaVersion(schemaVersion);
 
+        task.setParsedContent(writeJsonSafely(structure));
         task.setAiAnalysis(writeJsonSafely(pipelineResult));
         task.setUpdatedAt(LocalDateTime.now());
         parseTaskMapper.updateById(task);
@@ -1846,6 +1838,16 @@ public class AiIntelligenceService {
         return titles;
     }
 
+    private String writeParsedContentJson(String fileName, String rawMarkdown, String parseMode) {
+        DocumentStructureDto parsedContent = new DocumentStructureDto();
+        parsedContent.setTitle(fileName);
+        parsedContent.setDocumentType("UNKNOWN");
+        parsedContent.setOverview(trimToLength(rawMarkdown, 1200));
+        parsedContent.setRawMarkdown(rawMarkdown);
+        parsedContent.setParseMode(parseMode);
+        return writeJsonSafely(parsedContent);
+    }
+
     private String writeJsonSafely(Object value) {
         try {
             return objectMapper.writeValueAsString(value);
@@ -2217,10 +2219,12 @@ public class AiIntelligenceService {
         if (parsed == null || parsed.isBlank()) {
             return null;
         }
-        // 旧任务 parsedContent 可能是 JSON；不是 JSON 就直接当 markdown 返回。
         try {
-            objectMapper.readTree(parsed);
-            return null;
+            DocumentStructureDto parsedStructure = objectMapper.readValue(parsed, DocumentStructureDto.class);
+            if (parsedStructure.getRawMarkdown() != null && !parsedStructure.getRawMarkdown().isBlank()) {
+                return parsedStructure.getRawMarkdown();
+            }
+            return parsedStructure.getOverview();
         } catch (Exception ex) {
             return parsed;
         }

@@ -2,18 +2,30 @@ package com.smartedu.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.smartedu.entity.Course;
+import com.smartedu.entity.ParseTask;
+import com.smartedu.entity.Resource;
+import com.smartedu.entity.StudentActivity;
+import com.smartedu.entity.StudentActivityEvent;
+import com.smartedu.entity.StudentAlertRecord;
 import com.smartedu.entity.SubjectIdeologyMatch;
 import com.smartedu.entity.SubjectKnowledge;
-import com.smartedu.entity.StudentActivity;
 import com.smartedu.entity.SystemActivity;
+import com.smartedu.entity.TeachingMaterial;
 import com.smartedu.mapper.CourseMapper;
+import com.smartedu.mapper.ParseTaskMapper;
+import com.smartedu.mapper.ResourceMapper;
+import com.smartedu.mapper.StudentActivityEventMapper;
 import com.smartedu.mapper.StudentActivityMapper;
+import com.smartedu.mapper.StudentAlertRecordMapper;
 import com.smartedu.mapper.SubjectIdeologyMatchMapper;
 import com.smartedu.mapper.SubjectKnowledgeMapper;
 import com.smartedu.mapper.SystemActivityMapper;
+import com.smartedu.mapper.TeachingMaterialMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
+import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.*;
 
 /**
@@ -33,6 +45,11 @@ public class DashboardService {
     private final SubjectIdeologyMatchMapper subjectIdeologyMatchMapper;
     private final StudentActivityMapper studentActivityMapper;
     private final SystemActivityMapper systemActivityMapper;
+    private final StudentAlertRecordMapper studentAlertRecordMapper;
+    private final ResourceMapper resourceMapper;
+    private final ParseTaskMapper parseTaskMapper;
+    private final TeachingMaterialMapper teachingMaterialMapper;
+    private final StudentActivityEventMapper studentActivityEventMapper;
 
     /**
      * 获取仪表盘统计数据
@@ -59,9 +76,8 @@ public class DashboardService {
         stats.put("studentActivity", activityCount);
 
         // 4. 待处理预警
-        LambdaQueryWrapper<StudentActivity> alertWrapper = new LambdaQueryWrapper<>();
-        alertWrapper.gt(StudentActivity::getAlertLevel, 0);
-        long alertCount = studentActivityMapper.selectCount(alertWrapper);
+        long alertCount = studentAlertRecordMapper.selectCount(new LambdaQueryWrapper<StudentAlertRecord>()
+                .ne(StudentAlertRecord::getStatus, "RESOLVED"));
         stats.put("alertCount", alertCount);
 
         return stats;
@@ -179,5 +195,114 @@ public class DashboardService {
         }
 
         return trendData;
+    }
+
+    public Map<String, Object> getOverview(Long teacherId) {
+        Map<String, Object> overview = new HashMap<>();
+        overview.put("todoCards", buildTodoCards(teacherId));
+        overview.put("recentParseTasks", buildRecentParseTasks(teacherId));
+        overview.put("materialSummary", buildMaterialSummary(teacherId));
+        overview.put("activityTrend", buildActivityTrend());
+        return overview;
+    }
+
+    private List<Map<String, Object>> buildTodoCards(Long teacherId) {
+        List<Map<String, Object>> cards = new ArrayList<>();
+        cards.add(todoCard(
+                "alerts",
+                "Open Alerts",
+                "Students need teacher attention",
+                studentAlertRecordMapper.selectCount(new LambdaQueryWrapper<StudentAlertRecord>()
+                        .ne(StudentAlertRecord::getStatus, "RESOLVED")),
+                "ALERTS",
+                "warning"));
+        cards.add(todoCard(
+                "resources",
+                "Pending Resources",
+                "Knowledge resources awaiting review",
+                resourceMapper.selectCount(new LambdaQueryWrapper<Resource>()
+                        .eq(Resource::getReviewStatus, "PENDING")),
+                "SOURCE_MANAGEMENT",
+                "processing"));
+        cards.add(todoCard(
+                "matches",
+                "Pending Matches",
+                "Ideology matches awaiting review",
+                subjectIdeologyMatchMapper.selectCount(new LambdaQueryWrapper<SubjectIdeologyMatch>()
+                        .eq(SubjectIdeologyMatch::getReviewStatus, "PENDING")),
+                "MATCH_REVIEW",
+                "purple"));
+        cards.add(todoCard(
+                "uploads",
+                "Failed Parses",
+                "Upload tasks that need retry or correction",
+                parseTaskMapper.selectCount(new LambdaQueryWrapper<ParseTask>()
+                        .eq(ParseTask::getStatus, "FAILED")
+                        .eq(teacherId != null, ParseTask::getUserId, teacherId)),
+                "RESOURCE_UPLOAD",
+                "error"));
+        return cards;
+    }
+
+    private Map<String, Object> todoCard(String key, String title, String description, Long count, String view, String status) {
+        Map<String, Object> card = new HashMap<>();
+        card.put("key", key);
+        card.put("title", title);
+        card.put("description", description);
+        card.put("count", count == null ? 0 : count);
+        card.put("view", view);
+        card.put("status", status);
+        return card;
+    }
+
+    private List<Map<String, Object>> buildRecentParseTasks(Long teacherId) {
+        LambdaQueryWrapper<ParseTask> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(teacherId != null, ParseTask::getUserId, teacherId)
+                .orderByDesc(ParseTask::getUpdatedAt)
+                .last("LIMIT 5");
+        List<ParseTask> tasks = parseTaskMapper.selectList(wrapper);
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (ParseTask task : tasks) {
+            Map<String, Object> item = new HashMap<>();
+            item.put("id", task.getId());
+            item.put("fileName", task.getFileName());
+            item.put("status", task.getStatus());
+            item.put("progress", task.getProgress() == null ? 0 : task.getProgress());
+            item.put("updatedAt", task.getUpdatedAt() == null ? "" : task.getUpdatedAt().toString());
+            result.add(item);
+        }
+        return result;
+    }
+
+    private Map<String, Object> buildMaterialSummary(Long teacherId) {
+        Map<String, Object> summary = new HashMap<>();
+        LambdaQueryWrapper<TeachingMaterial> base = new LambdaQueryWrapper<TeachingMaterial>()
+                .eq(teacherId != null, TeachingMaterial::getUserId, teacherId);
+        summary.put("draftCount", teachingMaterialMapper.selectCount(base.clone().eq(TeachingMaterial::getStatus, "DRAFT")));
+        summary.put("publishedCount", teachingMaterialMapper.selectCount(base.clone().eq(TeachingMaterial::getStatus, "PUBLISHED")));
+        summary.put("latestCount", teachingMaterialMapper.selectCount(base.clone().eq(TeachingMaterial::getIsLatest, 1)));
+        return summary;
+    }
+
+    private List<Map<String, Object>> buildActivityTrend() {
+        LocalDate today = LocalDate.now();
+        LocalDate startDate = today.minusDays(6);
+        LocalDateTime startAt = startDate.atStartOfDay();
+        List<StudentActivityEvent> events = studentActivityEventMapper.selectList(new LambdaQueryWrapper<StudentActivityEvent>()
+                .ge(StudentActivityEvent::getOccurredAt, startAt));
+        Map<LocalDate, Long> counts = new HashMap<>();
+        for (StudentActivityEvent event : events) {
+            LocalDate day = event.getOccurredAt() == null ? today : event.getOccurredAt().toLocalDate();
+            counts.put(day, counts.getOrDefault(day, 0L) + 1);
+        }
+        List<Map<String, Object>> result = new ArrayList<>();
+        for (int i = 0; i < 7; i++) {
+            LocalDate day = startDate.plusDays(i);
+            Map<String, Object> item = new HashMap<>();
+            item.put("day", day.toString());
+            item.put("value", counts.getOrDefault(day, 0L));
+            result.add(item);
+        }
+        return result;
     }
 }

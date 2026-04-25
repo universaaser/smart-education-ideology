@@ -2,11 +2,14 @@ package com.smartedu.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.smartedu.common.PageResult;
 import com.smartedu.constant.KnowledgeRelationTypes;
 import com.smartedu.dto.KnowledgeNodeView;
 import com.smartedu.entity.CourseSubjectKnowledge;
 import com.smartedu.entity.IdeologyKnowledge;
+import com.smartedu.entity.KnowledgeChangeLog;
 import com.smartedu.entity.KnowledgeRelation;
 import com.smartedu.entity.StudentActivity;
 import com.smartedu.entity.SubjectIdeologyMatch;
@@ -15,6 +18,7 @@ import com.smartedu.entity.SubjectKnowledgeSource;
 import com.smartedu.entity.TeachingMaterialTrace;
 import com.smartedu.mapper.CourseSubjectKnowledgeMapper;
 import com.smartedu.mapper.IdeologyKnowledgeMapper;
+import com.smartedu.mapper.KnowledgeChangeLogMapper;
 import com.smartedu.mapper.KnowledgeRelationMapper;
 import com.smartedu.mapper.StudentActivityMapper;
 import com.smartedu.mapper.SubjectIdeologyMatchMapper;
@@ -42,11 +46,13 @@ public class KnowledgeService {
     private static final double GRAPH_GRID_X = 240D;
     private static final double GRAPH_GRID_Y = 180D;
     private static final double NODE_LABEL_LINE_HEIGHT = 16D;
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper().findAndRegisterModules();
 
     private final SubjectKnowledgeMapper subjectKnowledgeMapper;
     private final IdeologyKnowledgeMapper ideologyKnowledgeMapper;
     private final SubjectIdeologyMatchMapper subjectIdeologyMatchMapper;
     private final KnowledgeRelationMapper knowledgeRelationMapper;
+    private final KnowledgeChangeLogMapper knowledgeChangeLogMapper;
     private final KnowledgeChunkService knowledgeChunkService;
     private final CourseSubjectKnowledgeMapper courseSubjectKnowledgeMapper;
     private final SubjectKnowledgeSourceMapper subjectKnowledgeSourceMapper;
@@ -58,6 +64,7 @@ public class KnowledgeService {
             IdeologyKnowledgeMapper ideologyKnowledgeMapper,
             SubjectIdeologyMatchMapper subjectIdeologyMatchMapper,
             KnowledgeRelationMapper knowledgeRelationMapper,
+            KnowledgeChangeLogMapper knowledgeChangeLogMapper,
             KnowledgeChunkService knowledgeChunkService,
             CourseSubjectKnowledgeMapper courseSubjectKnowledgeMapper,
             SubjectKnowledgeSourceMapper subjectKnowledgeSourceMapper,
@@ -67,6 +74,7 @@ public class KnowledgeService {
         this.ideologyKnowledgeMapper = ideologyKnowledgeMapper;
         this.subjectIdeologyMatchMapper = subjectIdeologyMatchMapper;
         this.knowledgeRelationMapper = knowledgeRelationMapper;
+        this.knowledgeChangeLogMapper = knowledgeChangeLogMapper;
         this.knowledgeChunkService = knowledgeChunkService;
         this.courseSubjectKnowledgeMapper = courseSubjectKnowledgeMapper;
         this.subjectKnowledgeSourceMapper = subjectKnowledgeSourceMapper;
@@ -105,7 +113,8 @@ public class KnowledgeService {
         }
 
         LambdaQueryWrapper<SubjectIdeologyMatch> matchWrapper = new LambdaQueryWrapper<>();
-        matchWrapper.orderByDesc(SubjectIdeologyMatch::getIsPrimary)
+        matchWrapper.eq(SubjectIdeologyMatch::getReviewStatus, "APPROVED")
+                .orderByDesc(SubjectIdeologyMatch::getIsPrimary)
                 .orderByDesc(SubjectIdeologyMatch::getMatchScore);
         for (SubjectIdeologyMatch match : subjectIdeologyMatchMapper.selectList(matchWrapper)) {
             KnowledgeRelation relation = new KnowledgeRelation();
@@ -241,15 +250,12 @@ public class KnowledgeService {
 
     @Transactional
     public KnowledgeRelation createRelation(KnowledgeRelation relation) {
-        if (KnowledgeViewMapper.isIdeologyGraphId(relation.getFromNodeId())
-                || KnowledgeViewMapper.isIdeologyGraphId(relation.getToNodeId())) {
-            throw new IllegalArgumentException("当前仅支持学科知识之间创建关系");
-        }
+        validateEditableRelationEndpoints(relation.getFromNodeId(), relation.getToNodeId());
+        String relationType = validateRelationType(relation.getRelationType());
+        ensureRelationNotDuplicated(null, relation.getFromNodeId(), relation.getToNodeId(), relationType);
 
-        relation.setRelationType(KnowledgeRelationTypes.normalize(relation.getRelationType()));
-        if (relation.getLineStyle() == null || relation.getLineStyle().isBlank()) {
-            relation.setLineStyle(KnowledgeRelationTypes.defaultLineStyle(relation.getRelationType()));
-        }
+        relation.setRelationType(relationType);
+        relation.setLineStyle(KnowledgeRelationTypes.defaultLineStyle(relationType));
         relation.setCreatedAt(LocalDateTime.now());
         relation.setUpdatedAt(LocalDateTime.now());
         knowledgeRelationMapper.insert(relation);
@@ -257,11 +263,70 @@ public class KnowledgeService {
     }
 
     @Transactional
+    public KnowledgeRelation updateRelation(Long id, KnowledgeRelation request) {
+        if (id == null || id < 0) {
+            throw new IllegalArgumentException("Synthetic relations are read-only");
+        }
+
+        KnowledgeRelation existing = knowledgeRelationMapper.selectById(id);
+        if (existing == null) {
+            throw new IllegalArgumentException("Relation not found");
+        }
+
+        String relationType = validateRelationType(request.getRelationType());
+        ensureRelationNotDuplicated(id, existing.getFromNodeId(), existing.getToNodeId(), relationType);
+        KnowledgeRelation before = copyRelation(existing);
+
+        existing.setRelationType(relationType);
+        existing.setLineStyle(KnowledgeRelationTypes.defaultLineStyle(relationType));
+        existing.setWeight(request.getWeight());
+        existing.setDescription(request.getDescription());
+        existing.setUpdatedAt(LocalDateTime.now());
+        knowledgeRelationMapper.updateById(existing);
+        recordRelationChange("RELATION_UPDATE", id, before, existing);
+        return existing;
+    }
+
+    @Transactional
     public void deleteRelation(Long id) {
-        if (id != null && id < 0) {
-            return;
+        if (id == null || id < 0) {
+            throw new IllegalArgumentException("Synthetic relations are read-only");
+        }
+
+        KnowledgeRelation existing = knowledgeRelationMapper.selectById(id);
+        if (existing == null) {
+            throw new IllegalArgumentException("Relation not found");
         }
         knowledgeRelationMapper.deleteById(id);
+        recordRelationChange("RELATION_DELETE", id, existing, null);
+    }
+
+    @Transactional
+    public KnowledgeRelation undoLatestRelationChange() {
+        KnowledgeChangeLog changeLog = knowledgeChangeLogMapper.selectOne(new LambdaQueryWrapper<KnowledgeChangeLog>()
+                .eq(KnowledgeChangeLog::getUndone, 0)
+                .in(KnowledgeChangeLog::getChangeType, List.of("RELATION_UPDATE", "RELATION_DELETE"))
+                .orderByDesc(KnowledgeChangeLog::getCreatedAt)
+                .orderByDesc(KnowledgeChangeLog::getId)
+                .last("LIMIT 1"));
+        if (changeLog == null) {
+            throw new IllegalArgumentException("No relation change to undo");
+        }
+
+        KnowledgeRelation before = deserializeRelation(changeLog.getBeforeJson());
+        if ("RELATION_UPDATE".equals(changeLog.getChangeType())) {
+            before.setUpdatedAt(LocalDateTime.now());
+            knowledgeRelationMapper.updateById(before);
+        } else if ("RELATION_DELETE".equals(changeLog.getChangeType())) {
+            before.setDeleted(0);
+            before.setUpdatedAt(LocalDateTime.now());
+            restoreDeletedRelation(before);
+        }
+
+        changeLog.setUndone(1);
+        changeLog.setUpdatedAt(LocalDateTime.now());
+        knowledgeChangeLogMapper.updateById(changeLog);
+        return before;
     }
 
     public List<KnowledgeNodeView> searchNodes(String keyword) {
@@ -308,6 +373,73 @@ public class KnowledgeService {
             subject.setUpdatedAt(LocalDateTime.now());
             subjectKnowledgeMapper.updateById(subject);
         }
+    }
+
+    private void validateEditableRelationEndpoints(Long fromNodeId, Long toNodeId) {
+        if (fromNodeId == null || toNodeId == null) {
+            throw new IllegalArgumentException("Relation endpoints are required");
+        }
+        if (KnowledgeViewMapper.isIdeologyGraphId(fromNodeId) || KnowledgeViewMapper.isIdeologyGraphId(toNodeId)) {
+            throw new IllegalArgumentException("Only subject knowledge relations can be edited");
+        }
+    }
+
+    private String validateRelationType(String relationType) {
+        if (!KnowledgeRelationTypes.canNormalize(relationType)) {
+            throw new IllegalArgumentException("Unsupported relation type");
+        }
+        return KnowledgeRelationTypes.normalize(relationType);
+    }
+
+    private void ensureRelationNotDuplicated(Long currentId, Long fromNodeId, Long toNodeId, String relationType) {
+        LambdaQueryWrapper<KnowledgeRelation> wrapper = new LambdaQueryWrapper<>();
+        wrapper.eq(KnowledgeRelation::getFromNodeId, fromNodeId)
+                .eq(KnowledgeRelation::getToNodeId, toNodeId)
+                .eq(KnowledgeRelation::getRelationType, relationType)
+                .last("LIMIT 1");
+        KnowledgeRelation duplicated = knowledgeRelationMapper.selectOne(wrapper);
+        if (duplicated != null && (currentId == null || !currentId.equals(duplicated.getId()))) {
+            throw new IllegalArgumentException("Duplicate relation");
+        }
+    }
+
+    private void recordRelationChange(String changeType, Long relationId, KnowledgeRelation before, KnowledgeRelation after) {
+        KnowledgeChangeLog changeLog = new KnowledgeChangeLog();
+        changeLog.setChangeType(changeType);
+        changeLog.setRelationId(relationId);
+        changeLog.setBeforeJson(serializeRelation(before));
+        changeLog.setAfterJson(serializeRelation(after));
+        changeLog.setUndone(0);
+        changeLog.setCreatedAt(LocalDateTime.now());
+        changeLog.setUpdatedAt(LocalDateTime.now());
+        knowledgeChangeLogMapper.insert(changeLog);
+    }
+
+    private void restoreDeletedRelation(KnowledgeRelation relation) {
+        knowledgeRelationMapper.restoreDeleted(relation);
+    }
+
+    private String serializeRelation(KnowledgeRelation relation) {
+        if (relation == null) {
+            return null;
+        }
+        try {
+            return OBJECT_MAPPER.writeValueAsString(relation);
+        } catch (JsonProcessingException e) {
+            throw new IllegalArgumentException("Failed to serialize relation snapshot");
+        }
+    }
+
+    private KnowledgeRelation deserializeRelation(String relationJson) {
+        try {
+            return OBJECT_MAPPER.readValue(relationJson, KnowledgeRelation.class);
+        } catch (JsonProcessingException e) {
+            throw new IllegalArgumentException("Failed to read relation snapshot");
+        }
+    }
+
+    private KnowledgeRelation copyRelation(KnowledgeRelation relation) {
+        return deserializeRelation(serializeRelation(relation));
     }
 
     private List<KnowledgeNodeView> searchSubjectNodes(String keyword) {

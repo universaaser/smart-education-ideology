@@ -5,6 +5,13 @@ export enum View {
   AI_ASSISTANT = 'AI_ASSISTANT',
   RESOURCE_UPLOAD = 'RESOURCE_UPLOAD',
   COURSE_LIBRARY = 'COURSE_LIBRARY',
+  ALERTS = 'ALERTS',
+  SOURCE_MANAGEMENT = 'SOURCE_MANAGEMENT',
+  KEYWORD_TASKS = 'KEYWORD_TASKS',
+  MATCH_REVIEW = 'MATCH_REVIEW',
+  COURSE_MANAGEMENT = 'COURSE_MANAGEMENT',
+  MODEL_SETTINGS = 'MODEL_SETTINGS',
+  ADMIN_CONSOLE = 'ADMIN_CONSOLE',
   SETTINGS = 'SETTINGS',
   AUTH = 'AUTH'
 }
@@ -30,6 +37,7 @@ export interface ResourceUploadTarget {
 export interface ViewChangeOptions {
   highlightNodeIds?: number[];
   resourceUploadTarget?: ResourceUploadTarget;
+  courseId?: number;
 }
 
 export type ViewChangeHandler = (view: View, options?: ViewChangeOptions) => void;
@@ -56,6 +64,11 @@ export interface Capabilities {
   canCreateCourse: boolean;
   canManageUsers: boolean;
   canViewStudentAlerts: boolean;
+  canManageSources: boolean;
+  canManageKeywordTasks: boolean;
+  canReviewMatches: boolean;
+  canManageAiProviders: boolean;
+  canManageAdminConsole: boolean;
   canSubmitLearningActivity: boolean;
 }
 

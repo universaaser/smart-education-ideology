@@ -86,12 +86,31 @@ CREATE TABLE knowledge_relations (
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     deleted TINYINT NOT NULL DEFAULT 0 COMMENT '逻辑删除',
-    
+
     INDEX idx_from_node (from_node_id),
     INDEX idx_to_node (to_node_id),
     INDEX idx_relation_type (relation_type),
     UNIQUE INDEX uk_relation (from_node_id, to_node_id, relation_type)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='知识关系表';
+
+-- =====================================================
+-- 3.0.1 知识图谱变更日志表 (knowledge_change_logs)
+-- 说明：记录关系编辑/删除，用于最近一次撤销
+-- =====================================================
+DROP TABLE IF EXISTS knowledge_change_logs;
+CREATE TABLE knowledge_change_logs (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '变更日志ID',
+    change_type VARCHAR(50) NOT NULL COMMENT '变更类型',
+    relation_id BIGINT NOT NULL COMMENT '关系ID',
+    before_json TEXT COMMENT '变更前关系快照',
+    after_json TEXT COMMENT '变更后关系快照',
+    undone TINYINT NOT NULL DEFAULT 0 COMMENT '撤销状态：0-未撤销 1-已撤销',
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+
+    INDEX idx_knowledge_change_relation (relation_id),
+    INDEX idx_knowledge_change_undo (undone, created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='知识图谱变更日志表';
 
 -- =====================================================
 -- 3.1 思政知识表 (ideology_knowledge)
@@ -160,12 +179,40 @@ CREATE TABLE subject_ideology_matches (
     is_primary TINYINT NOT NULL DEFAULT 0 COMMENT '是否主匹配：0-否 1-是',
     match_score DECIMAL(5,2) DEFAULT 0 COMMENT '匹配分值',
     match_reason TEXT COMMENT '匹配理由',
+    review_status VARCHAR(30) NOT NULL DEFAULT 'PENDING' COMMENT '审核状态',
+    version INT NOT NULL DEFAULT 1 COMMENT '审核版本',
+    reviewer_id BIGINT COMMENT '审核人ID',
+    reviewed_at DATETIME COMMENT '审核时间',
+    review_comment VARCHAR(500) COMMENT '审核意见',
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
 
     INDEX idx_sim_subject_id (subject_knowledge_id),
     INDEX idx_sim_ideology_id (ideology_knowledge_id),
+    INDEX idx_sim_review_status (review_status, created_at),
     UNIQUE INDEX uk_subject_ideology (subject_knowledge_id, ideology_knowledge_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='学科知识思政匹配表';
+
+-- =====================================================
+-- 3.3.1 学科知识-思政知识匹配审核历史表 (subject_ideology_match_reviews)
+-- 说明：保存 AI 匹配人工审核和修改历史
+-- =====================================================
+DROP TABLE IF EXISTS subject_ideology_match_reviews;
+CREATE TABLE subject_ideology_match_reviews (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '审核历史ID',
+    match_id BIGINT NOT NULL COMMENT '匹配ID',
+    action VARCHAR(30) NOT NULL COMMENT '审核动作',
+    previous_status VARCHAR(30) COMMENT '前状态',
+    next_status VARCHAR(30) COMMENT '后状态',
+    previous_reason TEXT COMMENT '前匹配理由',
+    next_reason TEXT COMMENT '后匹配理由',
+    reviewer_id BIGINT COMMENT '审核人ID',
+    review_comment VARCHAR(500) COMMENT '审核意见',
+    version INT NOT NULL DEFAULT 1 COMMENT '动作后版本',
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+
+    INDEX idx_match_review_match (match_id, created_at),
+    INDEX idx_match_review_action (action, created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='学科知识思政匹配审核历史表';
 
 -- =====================================================
 -- 3.4 课程-学科知识关联表 (course_subject_knowledge)
@@ -271,6 +318,53 @@ CREATE TABLE student_activities (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='学习行为表';
 
 -- =====================================================
+-- 4.1 学习行为事件流表 (student_activity_events)
+-- 说明：记录学生端真实页面行为事件，用于学习报告和预警生成
+-- =====================================================
+DROP TABLE IF EXISTS student_activity_events;
+CREATE TABLE student_activity_events (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '事件ID',
+    student_id BIGINT NOT NULL COMMENT '学生用户ID',
+    course_id BIGINT NOT NULL COMMENT '课程ID',
+    event_type VARCHAR(50) NOT NULL COMMENT '事件类型：page_stay/material_open/knowledge_view/ai_ask/answer_submit/path_switch',
+    knowledge_point_id BIGINT COMMENT '知识点ID',
+    duration_seconds INT DEFAULT 0 COMMENT '停留或学习时长（秒）',
+    payload_json JSON COMMENT '事件载荷',
+    occurred_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '事件发生时间',
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+
+    INDEX idx_sae_student_course_time (student_id, course_id, occurred_at),
+    INDEX idx_sae_event_type (event_type),
+    INDEX idx_sae_knowledge_point (knowledge_point_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='学生行为事件流表';
+
+-- =====================================================
+-- 4.2 学生预警记录表 (student_alert_records)
+-- 说明：记录基于学生行为事件生成的预警、处理状态和反馈建议
+-- =====================================================
+DROP TABLE IF EXISTS student_alert_records;
+CREATE TABLE student_alert_records (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '预警记录ID',
+    student_id BIGINT NOT NULL COMMENT '学生用户ID',
+    course_id BIGINT NOT NULL COMMENT '课程ID',
+    alert_type VARCHAR(50) NOT NULL COMMENT '预警类型：LOW_ACTIVITY/LOW_STUDY_TIME/CONFUSION_RISK/LOW_RESOURCE_ENGAGEMENT',
+    alert_level TINYINT NOT NULL DEFAULT 1 COMMENT '预警等级：1-轻度 2-中度 3-重度',
+    title VARCHAR(200) NOT NULL COMMENT '预警标题',
+    message VARCHAR(500) NOT NULL COMMENT '教师端预警说明',
+    suggestion VARCHAR(500) COMMENT '学生端反馈建议',
+    status VARCHAR(30) NOT NULL DEFAULT 'PENDING' COMMENT '处理状态：PENDING/PROCESSING/RESOLVED/IGNORED',
+    evidence_json JSON COMMENT '预警证据快照',
+    generated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '生成时间',
+    handled_at DATETIME COMMENT '处理时间',
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+
+    INDEX idx_sar_course_status_level (course_id, status, alert_level),
+    INDEX idx_sar_student_course_status (student_id, course_id, status),
+    INDEX idx_sar_generated_at (generated_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='学生预警记录表';
+
+-- =====================================================
 -- 5. 课程表 (courses)
 -- 说明：存储课程基本信息
 -- =====================================================
@@ -289,11 +383,45 @@ CREATE TABLE courses (
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     deleted TINYINT NOT NULL DEFAULT 0 COMMENT '逻辑删除',
-    
+
     INDEX idx_teacher (teacher_id),
     INDEX idx_semester (semester),
     INDEX idx_status (status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='课程表';
+
+-- =====================================================
+-- 5.1 课程-学生绑定表 (course_students)
+-- 说明：保存学生加入课程的多对多关系
+-- =====================================================
+DROP TABLE IF EXISTS course_students;
+CREATE TABLE course_students (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '课程学生绑定ID',
+    course_id BIGINT NOT NULL COMMENT '课程ID',
+    student_id BIGINT NOT NULL COMMENT '学生用户ID',
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+
+    UNIQUE INDEX uk_course_student (course_id, student_id),
+    INDEX idx_course_student_student (student_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='课程学生绑定表';
+
+-- =====================================================
+-- 5.2 课程章节表 (course_chapters)
+-- 说明：存储课程章节树，用于资源库和材料绑定
+-- =====================================================
+DROP TABLE IF EXISTS course_chapters;
+CREATE TABLE course_chapters (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '章节ID',
+    course_id BIGINT NOT NULL COMMENT '课程ID',
+    parent_id BIGINT COMMENT '父章节ID',
+    title VARCHAR(200) NOT NULL COMMENT '章节标题',
+    sort_order INT DEFAULT 0 COMMENT '展示顺序',
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+
+    INDEX idx_course_chapter_course (course_id, sort_order),
+    INDEX idx_course_chapter_parent (parent_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='课程章节表';
 
 -- =====================================================
 -- 6. 资源表 (resources)
@@ -313,6 +441,9 @@ CREATE TABLE resources (
     file_type VARCHAR(20) COMMENT '文件类型',
     file_size BIGINT COMMENT '文件大小（字节）',
     sync_status ENUM('PENDING', 'PROCESSING', 'SYNCED', 'FAILED') DEFAULT 'PENDING' COMMENT '同步状态',
+    review_status ENUM('PENDING', 'APPROVED', 'REJECTED') DEFAULT 'APPROVED' COMMENT '审核状态',
+    reviewed_by BIGINT COMMENT '审核人ID',
+    reviewed_at DATETIME COMMENT '审核时间',
     parse_task_id BIGINT COMMENT '关联的解析任务ID',
     creator_id BIGINT COMMENT '创建者ID',
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
@@ -322,9 +453,97 @@ CREATE TABLE resources (
     INDEX idx_category (category),
     UNIQUE INDEX uk_source_url (source_url),
     INDEX idx_sync_status (sync_status),
+    INDEX idx_review_status (review_status),
     INDEX idx_creator (creator_id),
     FULLTEXT INDEX ft_search (title, content, ideology_summary)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='资源表';
+
+-- =====================================================
+-- 6.1 抓取来源配置表 (crawl_sources)
+-- 说明：存储可启用/停用的知识来源
+-- =====================================================
+DROP TABLE IF EXISTS crawl_sources;
+CREATE TABLE crawl_sources (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '来源ID',
+    name VARCHAR(120) NOT NULL COMMENT '来源名称',
+    base_url VARCHAR(500) NOT NULL COMMENT '基础地址或列表页地址',
+    enabled TINYINT NOT NULL DEFAULT 1 COMMENT '是否启用：0-否 1-是',
+    remark VARCHAR(500) COMMENT '备注',
+    last_run_at DATETIME COMMENT '最近运行时间',
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+
+    UNIQUE INDEX uk_crawl_source_base_url (base_url),
+    INDEX idx_crawl_source_enabled (enabled)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='抓取来源配置表';
+
+-- =====================================================
+-- 6.2 抓取运行日志表 (crawl_run_logs)
+-- 说明：记录每次来源抓取结果
+-- =====================================================
+DROP TABLE IF EXISTS crawl_run_logs;
+CREATE TABLE crawl_run_logs (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '运行日志ID',
+    source_id BIGINT COMMENT '来源ID',
+    source_name VARCHAR(120) COMMENT '来源名称快照',
+    status VARCHAR(30) NOT NULL COMMENT '运行状态：DONE/FAILED/STOPPED',
+    total_fetched INT DEFAULT 0 COMMENT '抓取链接数',
+    total_created INT DEFAULT 0 COMMENT '新增资源数',
+    total_deduplicated INT DEFAULT 0 COMMENT '去重跳过数',
+    total_failed INT DEFAULT 0 COMMENT '失败数',
+    error_summary VARCHAR(500) COMMENT '错误摘要',
+    stats_json JSON COMMENT '站点统计快照',
+    started_at DATETIME COMMENT '开始时间',
+    finished_at DATETIME COMMENT '结束时间',
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+
+    INDEX idx_crawl_run_source (source_id, started_at),
+    INDEX idx_crawl_run_status (status, started_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='抓取运行日志表';
+
+-- =====================================================
+-- 6.3 关键词采集任务表 (keyword_tasks)
+-- 说明：按课程关键词生成资源采集任务
+-- =====================================================
+DROP TABLE IF EXISTS keyword_tasks;
+CREATE TABLE keyword_tasks (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '关键词任务ID',
+    course_id BIGINT NOT NULL COMMENT '课程ID',
+    creator_id BIGINT COMMENT '创建者用户ID',
+    keywords VARCHAR(1000) NOT NULL COMMENT '逗号分隔关键词',
+    status VARCHAR(30) NOT NULL DEFAULT 'PENDING' COMMENT '任务状态',
+    result_summary VARCHAR(500) COMMENT '结果摘要',
+    error_summary VARCHAR(500) COMMENT '错误摘要',
+    finished_at DATETIME COMMENT '完成时间',
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+
+    INDEX idx_keyword_task_course (course_id, created_at),
+    INDEX idx_keyword_task_status (status, created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='关键词采集任务表';
+
+-- =====================================================
+-- 6.4 关键词采集任务结果表 (keyword_task_items)
+-- 说明：保存关键词采集生成的候选资源
+-- =====================================================
+DROP TABLE IF EXISTS keyword_task_items;
+CREATE TABLE keyword_task_items (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '关键词任务结果ID',
+    task_id BIGINT NOT NULL COMMENT '关键词任务ID',
+    keyword VARCHAR(80) NOT NULL COMMENT '关键词',
+    title VARCHAR(200) NOT NULL COMMENT '结果标题',
+    source_url VARCHAR(500) COMMENT '来源链接',
+    excerpt TEXT COMMENT '来源摘录',
+    ai_summary TEXT COMMENT 'AI摘要',
+    ideology_tags VARCHAR(500) COMMENT '思政标签JSON',
+    status VARCHAR(30) NOT NULL DEFAULT 'PENDING' COMMENT '结果状态',
+    resource_id BIGINT COMMENT '接受后生成的资源ID',
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+
+    INDEX idx_keyword_item_task (task_id, id),
+    INDEX idx_keyword_item_status (status, created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='关键词采集任务结果表';
 
 -- =====================================================
 -- 7. AI对话会话表 (chat_sessions)
@@ -364,6 +583,43 @@ CREATE TABLE chat_messages (
     INDEX idx_session (session_id),
     INDEX idx_created_at (created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='AI对话消息表';
+
+-- =====================================================
+-- 8.1 AI Provider配置表 (ai_provider_configs)
+-- 说明：保存多模型 provider 的可视化配置
+-- =====================================================
+DROP TABLE IF EXISTS ai_provider_configs;
+CREATE TABLE ai_provider_configs (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT 'AI Provider配置ID',
+    provider_key VARCHAR(50) NOT NULL COMMENT 'Provider标识',
+    label VARCHAR(100) NOT NULL COMMENT 'Provider显示名称',
+    enabled TINYINT NOT NULL DEFAULT 0 COMMENT '启用状态：0-禁用 1-启用',
+    api_base VARCHAR(500) NULL COMMENT 'API Base URL',
+    model VARCHAR(100) NULL COMMENT '模型名称',
+    api_key VARCHAR(500) NULL COMMENT 'API Key',
+    timeout_seconds INT NOT NULL DEFAULT 120 COMMENT '超时时间（秒）',
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+
+    UNIQUE INDEX uk_ai_provider_key (provider_key)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='AI Provider配置表';
+
+-- =====================================================
+-- 8.2 AI场景路由配置表 (ai_route_configs)
+-- 说明：保存 taskType 到 provider/model 的可视化路由配置
+-- =====================================================
+DROP TABLE IF EXISTS ai_route_configs;
+CREATE TABLE ai_route_configs (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT 'AI路由配置ID',
+    task_type VARCHAR(50) NOT NULL COMMENT '任务类型',
+    provider_key VARCHAR(50) NOT NULL COMMENT 'Provider标识',
+    model VARCHAR(100) NULL COMMENT '模型覆盖值',
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+
+    UNIQUE INDEX uk_ai_route_task (task_type),
+    INDEX idx_ai_route_provider (provider_key)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='AI场景路由配置表';
 
 -- =====================================================
 -- 9. 文档解析任务表 (parse_tasks)

@@ -228,6 +228,16 @@
 - 功能完善未同步维护验收清单时，即使代码已实现也不算完成。
 - 临时 demo、模拟数据、兜底逻辑或未接真实服务的功能不能标记为 `[x]`，只能标记为 `[~]`，并写明正式项目仍需补什么。
 
-## 11. Squad Collaboration
+## 11. 数据库迁移执行
+
+- 数据库结构升级、迁移脚本执行和迁移结果核对默认由 agent 自动完成，不要求用户手工执行。
+- 本地演示数据库默认连接信息固定为：数据库 `smart_education`，用户 `root`，密码 `root`。
+- 执行数据库迁移前，agent 必须优先使用 `scripts/update_database.ps1 -User root -Password root -DryRun` 检查将要执行的迁移。
+- dry-run 无异常后，agent 应执行 `scripts/update_database.ps1 -User root -Password root` 完成升级，并核对 `schema_migrations`、关键表、关键字段和关键索引。
+- 迁移脚本执行前必须保留或生成数据库备份；若备份失败，不得继续执行正式迁移。
+- 若本机 `mysql` 或 `mysqldump` 不在 PATH，agent 应自行定位或要求用户提供 MySQL bin 路径；不得把“请用户手动执行 SQL”作为默认交付方式。
+- 若迁移失败，agent 必须说明已执行到的脚本、数据库当前状态、备份位置、失败原因和下一步修复方案。
+
+## 12. Squad Collaboration
 
 This project uses squad for multi-agent collaboration. Run `squad help` for all commands and usage guide.

@@ -148,11 +148,22 @@ public class KnowledgeController {
      */
     @PostMapping("/relations")
     public Result<KnowledgeRelation> createRelation(@RequestBody KnowledgeRelation relation) {
-        if (relation.getFromNodeId() == null || relation.getToNodeId() == null) {
-            return Result.badRequest("起始节点和结束节点不能为空");
+        try {
+            KnowledgeRelation created = knowledgeService.createRelation(relation);
+            return Result.success("Relation created successfully", created);
+        } catch (IllegalArgumentException e) {
+            return Result.badRequest(e.getMessage());
         }
-        KnowledgeRelation created = knowledgeService.createRelation(relation);
-        return Result.success("关系创建成功", created);
+    }
+
+    @PutMapping("/relations/{id}")
+    public Result<KnowledgeRelation> updateRelation(@PathVariable Long id, @RequestBody KnowledgeRelation relation) {
+        try {
+            KnowledgeRelation updated = knowledgeService.updateRelation(id, relation);
+            return Result.success("Relation updated successfully", updated);
+        } catch (IllegalArgumentException e) {
+            return Result.badRequest(e.getMessage());
+        }
     }
 
     /**
@@ -160,8 +171,22 @@ public class KnowledgeController {
      */
     @DeleteMapping("/relations/{id}")
     public Result<Void> deleteRelation(@PathVariable Long id) {
-        knowledgeService.deleteRelation(id);
-        return Result.success("关系已删除", null);
+        try {
+            knowledgeService.deleteRelation(id);
+            return Result.success("Relation deleted successfully", null);
+        } catch (IllegalArgumentException e) {
+            return Result.badRequest(e.getMessage());
+        }
+    }
+
+    @PostMapping("/relations/undo-latest")
+    public Result<KnowledgeRelation> undoLatestRelationChange() {
+        try {
+            KnowledgeRelation relation = knowledgeService.undoLatestRelationChange();
+            return Result.success("Relation change undone successfully", relation);
+        } catch (IllegalArgumentException e) {
+            return Result.badRequest(e.getMessage());
+        }
     }
 
     /**

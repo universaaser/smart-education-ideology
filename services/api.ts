@@ -132,6 +132,7 @@ export const dashboardApi = {
   getCourses: () => get<CourseInfo[]>('/dashboard/courses'),
   getActivities: (limit = 10) => get<ActivityInfo[]>(`/dashboard/activities?limit=${limit}`),
   getTrend: () => get<TrendItem[]>('/dashboard/trend'),
+  getOverview: () => get<DashboardOverviewInfo>('/dashboard/overview'),
 };
 
 export const chatApi = {
@@ -169,8 +170,60 @@ export const resourceApi = {
   startCrawlUpdate: () => post<CrawlTaskStatusInfo>('/resources/crawl/start'),
   stopCrawlUpdate: () => post<CrawlTaskStatusInfo>('/resources/crawl/stop'),
   getCrawlStatus: () => get<CrawlTaskStatusInfo>('/resources/crawl/status'),
+  getReviewResources: (reviewStatus?: string) =>
+    get<ResourceInfo[]>(`/resources/review${buildQueryString({ reviewStatus })}`),
+  updateReviewStatus: (id: number, reviewStatus: string, reviewerId?: number) =>
+    put<ResourceInfo>(`/resources/${id}/review-status`, { reviewStatus, reviewerId }),
   // compatibility route
   triggerCrawlUpdate: (_limitPerSite = 20) => post<CrawlTaskStatusInfo>('/resources/crawl/update', {}),
+};
+
+export const crawlSourceApi = {
+  listSources: () => get<CrawlSourceInfo[]>('/crawl-sources'),
+  createSource: (data: CrawlSourceRequest) => post<CrawlSourceInfo>('/crawl-sources', data),
+  updateSource: (id: number, data: CrawlSourceRequest) => put<CrawlSourceInfo>(`/crawl-sources/${id}`, data),
+  triggerSource: (id: number) => post<CrawlTaskStatusInfo>(`/crawl-sources/${id}/trigger`),
+  listRunLogs: (sourceId?: number) => get<CrawlRunLogInfo[]>(`/crawl-sources/runs${buildQueryString({ sourceId })}`),
+};
+
+export const keywordTaskApi = {
+  listTasks: (courseId?: number) => get<KeywordTaskInfo[]>(`/keyword-tasks${buildQueryString({ courseId })}`),
+  getTask: (id: number) => get<KeywordTaskInfo>(`/keyword-tasks/${id}`),
+  createTask: (data: KeywordTaskCreateRequest) => post<KeywordTaskInfo>('/keyword-tasks', data),
+  runTask: (id: number) => post<KeywordTaskInfo>(`/keyword-tasks/${id}/run`),
+  acceptItem: (taskId: number, itemId: number) => post<ResourceInfo>(`/keyword-tasks/${taskId}/items/${itemId}/accept`),
+};
+
+export const matchReviewApi = {
+  listPending: (status?: string) => get<MatchReviewInfo[]>(`/matches/pending${buildQueryString({ status })}`),
+  approve: (id: number, data: MatchReviewUpdateRequest = {}) => put<MatchReviewInfo>(`/matches/${id}/approve`, data),
+  reject: (id: number, data: MatchReviewUpdateRequest = {}) => put<MatchReviewInfo>(`/matches/${id}/reject`, data),
+  revise: (id: number, data: MatchReviewUpdateRequest) => post<MatchReviewInfo>(`/matches/${id}/revise`, data),
+  listHistory: (id: number) => get<MatchReviewHistoryInfo[]>(`/matches/${id}/history`),
+};
+
+export const aiProviderApi = {
+  listProviders: () => get<AiProviderConfigInfo[]>('/admin/ai-providers'),
+  saveProvider: (providerKey: string, data: AiProviderConfigRequest) =>
+    put<AiProviderConfigInfo>(`/admin/ai-providers/${providerKey}`, data),
+  testProvider: (providerKey: string) => post<AiProviderTestResultInfo>(`/admin/ai-providers/${providerKey}/test`),
+  listRoutes: () => get<AiRouteConfigInfo[]>('/admin/ai-providers/routes'),
+  saveRoute: (taskType: string, data: AiRouteConfigRequest) =>
+    put<AiRouteConfigInfo>(`/admin/ai-providers/routes/${taskType}`, data),
+};
+
+export const adminApi = {
+  listUsers: (params: { keyword?: string; role?: string; page?: number; size?: number } = {}) =>
+    get<AdminPageResultInfo<AdminUserInfo>>(`/admin/users${buildQueryString(params)}`),
+  createUser: (data: AdminUserRequest) => post<AdminUserInfo>('/admin/users', data),
+  updateUser: (id: number, data: AdminUserRequest) => put<AdminUserInfo>(`/admin/users/${id}`, data),
+  updateUserStatus: (id: number, status: number) =>
+    put<AdminUserInfo>(`/admin/users/${id}/status`, { status }),
+  listCourseStudents: (courseId: number) => get<CourseStudentInfo[]>(`/admin/courses/${courseId}/students`),
+  addCourseStudent: (courseId: number, studentId: number) =>
+    post<CourseStudentInfo>(`/admin/courses/${courseId}/students`, { studentId }),
+  removeCourseStudent: (courseId: number, studentId: number) =>
+    del<void>(`/admin/courses/${courseId}/students/${studentId}`),
 };
 
 export const knowledgeApi = {
@@ -182,15 +235,30 @@ export const knowledgeApi = {
   deleteNode: (id: number) => del<void>(`/knowledge/nodes/${id}`),
   createRelation: (fromNodeId: number, toNodeId: number, relationType: string) =>
     post<KnowledgeRelationInfo>('/knowledge/relations', { fromNodeId, toNodeId, relationType }),
+  updateRelation: (id: number, data: { relationType: string; description?: string; weight?: number }) =>
+    put<KnowledgeRelationInfo>(`/knowledge/relations/${id}`, data),
+  deleteRelation: (id: number) => del<void>(`/knowledge/relations/${id}`),
+  undoLatestRelationChange: () => post<KnowledgeRelationInfo>('/knowledge/relations/undo-latest'),
 };
 
 export const courseApi = {
+  getById: (courseId: number) => get<CourseInfo>(`/courses/${courseId}`),
+  getStudentCourses: (studentId: number) => get<CourseInfo[]>(`/courses/student/${studentId}`),
   getKnowledgePoints: (courseId: number) =>
     get<KnowledgeNodeInfo[]>(`/courses/${courseId}/knowledge-points`),
   getMaterials: (courseId: number) =>
     get<CourseTeachingMaterialGroupInfo[]>(`/courses/${courseId}/materials`),
+  getChapters: (courseId: number) => get<CourseChapterInfo[]>(`/courses/${courseId}/chapters`),
+  getStatusSummary: (courseId: number) => get<CourseStatusSummaryInfo>(`/courses/${courseId}/status-summary`),
   create: (data: { name: string; code?: string; description?: string; semester?: string; teacherId: number }) =>
     post<CourseInfo>('/courses', data),
+  update: (courseId: number, data: CourseUpdateRequest) => put<CourseInfo>(`/courses/${courseId}`, data),
+  listStudentOptions: () => get<StudentOptionInfo[]>('/courses/student-options'),
+  listCourseStudents: (courseId: number) => get<CourseStudentInfo[]>(`/courses/${courseId}/students`),
+  addCourseStudent: (courseId: number, studentId: number) =>
+    post<CourseStudentInfo>(`/courses/${courseId}/students`, { studentId }),
+  removeCourseStudent: (courseId: number, studentId: number) =>
+    del<void>(`/courses/${courseId}/students/${studentId}`),
 };
 
 export const userApi = {
@@ -305,6 +373,35 @@ export const pathApi = {
     }),
 };
 
+export const studentActivityApi = {
+  submitEvents: (data: StudentActivityBatchRequest) =>
+    post<{ savedCount: number }>('/student/events', data),
+  getReport: (studentId: number, courseId?: number) =>
+    get<StudentLearningReportInfo>(`/student/report${buildQueryString({ studentId, courseId })}`),
+  getRecentActivities: (studentId: number, courseId?: number, limit = 8) =>
+    get<StudentRecentActivityInfo[]>(`/student/recent-activities${buildQueryString({ studentId, courseId, limit })}`),
+};
+
+export const studentQuizApi = {
+  getQuestions: (materialId: number) =>
+    get<StudentQuizQuestionInfo[]>(`/student/quiz/questions${buildQueryString({ materialId })}`),
+  submitAnswer: (data: StudentQuizSubmitRequest) =>
+    post<StudentQuizSubmitResultInfo>('/student/quiz/submit', data),
+};
+
+export const alertApi = {
+  evaluate: (studentId: number, courseId: number) =>
+    post<StudentAlertRecordInfo[]>(`/alerts/evaluate${buildQueryString({ studentId, courseId })}`),
+  getSummary: (courseId?: number) =>
+    get<StudentAlertSummaryInfo>(`/alerts/summary${buildQueryString({ courseId })}`),
+  list: (params: { courseId?: number; alertLevel?: number; status?: string } = {}) =>
+    get<StudentAlertRecordInfo[]>(`/alerts${buildQueryString(params)}`),
+  updateStatus: (id: number, status: string) =>
+    put<StudentAlertRecordInfo>(`/alerts/${id}/status`, { status }),
+  getStudentFeedback: (studentId: number, courseId?: number) =>
+    get<StudentAlertRecordInfo[]>(`/student/feedback${buildQueryString({ studentId, courseId })}`),
+};
+
 /**
  * 知识图谱 Excel 导入导出 API
  */
@@ -346,11 +443,92 @@ export interface CourseInfo {
   name: string;
   progress: number;
   ideologyScore: string;
-  gradeColor: string;
-  gradeLabel: string;
+  gradeColor?: string;
+  gradeLabel?: string;
   code?: string;
   description?: string;
+  teacherId?: number;
   semester?: string;
+  coverImage?: string;
+  status?: number;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface CourseUpdateRequest {
+  name?: string;
+  code?: string;
+  description?: string;
+  teacherId?: number;
+  semester?: string;
+  progress?: number;
+  ideologyScore?: string;
+  coverImage?: string;
+  status?: number;
+}
+
+export interface AdminPageResultInfo<T> {
+  records: T[];
+  total: number;
+  page: number;
+  size: number;
+}
+
+export interface AdminUserInfo {
+  id: number;
+  username: string;
+  email?: string;
+  realName?: string;
+  role: string;
+  department?: string;
+  status: number;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface AdminUserRequest {
+  username?: string;
+  password?: string;
+  email?: string;
+  realName?: string;
+  role?: string;
+  department?: string;
+}
+
+export interface CourseStudentInfo {
+  courseId: number;
+  studentId: number;
+  username: string;
+  realName?: string;
+  email?: string;
+  department?: string;
+  boundAt?: string;
+}
+
+export interface CourseChapterInfo {
+  id: number;
+  courseId: number;
+  parentId?: number | null;
+  title: string;
+  sortOrder: number;
+  updatedAt?: string;
+}
+
+export interface CourseStatusSummaryInfo {
+  chapterCount: number;
+  parseTaskCount: number;
+  materialCount: number;
+  draftMaterialCount: number;
+  publishedMaterialCount: number;
+  knowledgePointCount: number;
+}
+
+export interface StudentOptionInfo {
+  id: number;
+  username: string;
+  realName?: string;
+  email?: string;
+  department?: string;
 }
 
 export interface ActivityInfo {
@@ -362,15 +540,135 @@ export interface ActivityInfo {
 }
 
 export interface TrendItem {
-  week: string;
+  week?: string;
+  day?: string;
   value: number;
+}
+
+export interface DashboardTodoCardInfo {
+  key: string;
+  title: string;
+  description: string;
+  count: number;
+  view: string;
+  status: string;
+}
+
+export interface DashboardParseTaskInfo {
+  id: number;
+  fileName: string;
+  status: string;
+  progress: number;
+  updatedAt: string;
+}
+
+export interface DashboardOverviewInfo {
+  todoCards: DashboardTodoCardInfo[];
+  recentParseTasks: DashboardParseTaskInfo[];
+  materialSummary: {
+    draftCount: number;
+    publishedCount: number;
+    latestCount: number;
+  };
+  activityTrend: TrendItem[];
+}
+
+export interface StudentActivityEventRequest {
+  eventType: 'page_stay' | 'material_open' | 'knowledge_view' | 'ai_ask' | 'answer_submit' | 'path_switch' | string;
+  courseId?: number;
+  knowledgePointId?: number;
+  durationSeconds?: number;
+  payload?: Record<string, unknown>;
+  occurredAt?: string;
+}
+
+export interface StudentActivityBatchRequest {
+  studentId: number;
+  courseId: number;
+  events: StudentActivityEventRequest[];
+}
+
+export interface StudentLearningReportInfo {
+  todayStudyMinutes: number;
+  totalStudyMinutes: number;
+  todayEventCount: number;
+  knowledgeViewCount: number;
+  quizAnswerCount: number;
+  correctQuizAnswerCount: number;
+  quizCorrectRate: number;
+  weakKnowledgePointIds: number[];
+  weeklyTrend: { date: string; eventCount: number }[];
+}
+
+export interface StudentQuizQuestionInfo {
+  questionId: string;
+  materialId: number;
+  questionIndex: number;
+  courseId?: number | null;
+  knowledgePointId?: number | null;
+  questionType: string;
+  difficulty?: string;
+  stem: string;
+  options: string[];
+}
+
+export interface StudentQuizSubmitRequest {
+  studentId: number;
+  courseId: number;
+  materialId: number;
+  questionIndex: number;
+  answer: string;
+}
+
+export interface StudentQuizSubmitResultInfo {
+  questionId: string;
+  correct: boolean;
+  correctAnswer: string;
+  knowledgePointId?: number | null;
+}
+
+export interface StudentRecentActivityInfo {
+  id: number;
+  courseId: number;
+  eventType: string;
+  title: string;
+  description: string;
+  occurredAt: string;
+}
+
+export interface StudentAlertRecordInfo {
+  id: number;
+  studentId: number;
+  courseId: number;
+  alertType: string;
+  alertLevel: number;
+  title: string;
+  message: string;
+  suggestion?: string;
+  status: string;
+  generatedAt: string;
+  handledAt?: string | null;
+}
+
+export interface StudentAlertSummaryInfo {
+  total: number;
+  pending: number;
+  processing: number;
+  resolved: number;
+  ignored: number;
+  mild: number;
+  moderate: number;
+  severe: number;
 }
 
 export interface ChatSessionInfo {
   id: number;
   userId: number;
   title: string;
+  summary?: string;
   aiModel: string;
+  messageCount?: number;
+  lastMessageAt?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -380,6 +678,7 @@ export interface ChatMessageInfo {
   sessionId: number;
   role: string;
   content: string;
+  contentType?: string;
   createdAt: string;
 }
 
@@ -465,8 +764,162 @@ export interface ResourceInfo {
   ideologyAnalysis?: string;
   tags: string;
   syncStatus?: string;
+  reviewStatus?: string;
+  reviewedBy?: number | null;
+  reviewedAt?: string | null;
   status?: string;
   createdAt: string;
+}
+
+export interface CrawlSourceInfo {
+  id: number;
+  name: string;
+  baseUrl: string;
+  enabled: number;
+  remark?: string;
+  lastRunAt?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface CrawlSourceRequest {
+  name: string;
+  baseUrl: string;
+  enabled: boolean;
+  remark?: string;
+}
+
+export interface CrawlRunLogInfo {
+  id: number;
+  sourceId?: number | null;
+  sourceName?: string;
+  status: string;
+  totalFetched: number;
+  totalCreated: number;
+  totalDeduplicated: number;
+  totalFailed: number;
+  errorSummary?: string;
+  statsJson?: string;
+  startedAt?: string;
+  finishedAt?: string;
+  createdAt?: string;
+}
+
+export interface KeywordTaskCreateRequest {
+  courseId: number;
+  creatorId?: number;
+  keywords: string[];
+}
+
+export interface KeywordTaskItemInfo {
+  id: number;
+  taskId: number;
+  keyword: string;
+  title: string;
+  sourceUrl?: string;
+  excerpt?: string;
+  aiSummary?: string;
+  ideologyTags?: string;
+  status: string;
+  resourceId?: number | null;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface KeywordTaskInfo {
+  id: number;
+  courseId: number;
+  creatorId?: number | null;
+  keywords: string[];
+  status: string;
+  resultSummary?: string;
+  errorSummary?: string;
+  finishedAt?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  items: KeywordTaskItemInfo[];
+}
+
+export interface MatchReviewUpdateRequest {
+  reviewerId?: number;
+  matchReason?: string;
+  reviewComment?: string;
+}
+
+export interface MatchReviewInfo {
+  id: number;
+  subjectKnowledgeId: number;
+  subjectKnowledgeName: string;
+  subject: string;
+  category: string;
+  ideologyKnowledgeId: number;
+  ideologyName: string;
+  ideologyDescription?: string;
+  isPrimary: number;
+  matchScore?: number;
+  matchReason?: string;
+  reviewStatus: string;
+  version: number;
+  reviewerId?: number | null;
+  reviewedAt?: string | null;
+  reviewComment?: string;
+  createdAt?: string;
+}
+
+export interface MatchReviewHistoryInfo {
+  id: number;
+  matchId: number;
+  action: string;
+  previousStatus?: string;
+  nextStatus?: string;
+  previousReason?: string;
+  nextReason?: string;
+  reviewerId?: number | null;
+  reviewComment?: string;
+  version: number;
+  createdAt?: string;
+}
+
+export interface AiProviderConfigInfo {
+  id?: number | null;
+  providerKey: string;
+  label: string;
+  enabled: boolean;
+  apiBase?: string;
+  model?: string;
+  keyConfigured: boolean;
+  timeoutSeconds: number;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+}
+
+export interface AiProviderConfigRequest {
+  label?: string;
+  enabled?: boolean;
+  apiBase?: string;
+  model?: string;
+  apiKey?: string;
+  timeoutSeconds?: number;
+}
+
+export interface AiRouteConfigInfo {
+  id?: number | null;
+  taskType: string;
+  providerKey: string;
+  model?: string;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+}
+
+export interface AiRouteConfigRequest {
+  providerKey: string;
+  model?: string;
+}
+
+export interface AiProviderTestResultInfo {
+  providerKey: string;
+  success: boolean;
+  message: string;
 }
 
 export interface CrawlSiteStatInfo {
@@ -543,6 +996,8 @@ export interface KnowledgeRelationInfo {
   toNodeId: number;
   relationType: string;
   lineStyle?: string;
+  weight?: number;
+  description?: string;
 }
 
 export interface UploadTaskInfo {
@@ -699,6 +1154,7 @@ export interface TeachingTraceItemInfo {
 }
 
 export interface TeachingMaterialSaveRequest {
+  chapterId?: number | null;
   title: string;
   lectureNotes: string;
   cases: string[];
@@ -710,6 +1166,7 @@ export interface TeachingMaterialDraftInfo {
   parseTaskId: number;
   userId: number;
   courseId?: number | null;
+  chapterId?: number | null;
   title: string;
   lectureNotes: string;
   cases: string[];
@@ -726,6 +1183,7 @@ export interface TeachingMaterialViewInfo {
   parseTaskId: number;
   userId: number;
   courseId?: number | null;
+  chapterId?: number | null;
   title: string;
   lectureNotes: string;
   cases: string[];
@@ -750,6 +1208,7 @@ export interface MaterialVersionItemInfo {
 export interface CourseTeachingMaterialGroupInfo {
   parseTaskId: number;
   courseId: number;
+  chapterId?: number | null;
   displayTitle: string;
   sourceFileName: string;
   latestMaterialId: number;

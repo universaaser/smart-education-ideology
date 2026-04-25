@@ -4,7 +4,9 @@ import {
   courseApi,
   materialApi,
   semanticApi,
+  CourseChapterInfo,
   CourseInfo,
+  CourseStatusSummaryInfo,
   CourseTeachingMaterialGroupInfo,
   KnowledgeNodeInfo,
   TeachingMaterialViewInfo,
@@ -30,9 +32,11 @@ const { Text, Title } = Typography;
 
 interface ResourceLibraryProps {
   onChangeView?: ViewChangeHandler;
+  onMaterialOpen?: (materialId: number, courseId: number) => void;
+  onCourseOpen?: (courseId: number) => void;
 }
 
-export const ResourceLibrary: React.FC<ResourceLibraryProps> = ({ onChangeView }) => {
+export const ResourceLibrary: React.FC<ResourceLibraryProps> = ({ onChangeView, onMaterialOpen, onCourseOpen }) => {
   const { roleUi, currentUser } = useAuth();
   const canManageMaterials = !!roleUi?.capabilities?.canUploadResource;
 
@@ -41,6 +45,9 @@ export const ResourceLibrary: React.FC<ResourceLibraryProps> = ({ onChangeView }
   const [expandedKeys, setExpandedKeys] = useState<string[]>([]);
   const [knowledgePointsMap, setKnowledgePointsMap] = useState<Record<number, KnowledgeNodeInfo[]>>({});
   const [kpLoadingMap, setKpLoadingMap] = useState<Record<number, boolean>>({});
+  const [chaptersMap, setChaptersMap] = useState<Record<number, CourseChapterInfo[]>>({});
+  const [statusSummaryMap, setStatusSummaryMap] = useState<Record<number, CourseStatusSummaryInfo>>({});
+  const [chapterLoadingMap, setChapterLoadingMap] = useState<Record<number, boolean>>({});
   const [materialGroupsMap, setMaterialGroupsMap] = useState<Record<number, CourseTeachingMaterialGroupInfo[]>>({});
   const [materialLoadingMap, setMaterialLoadingMap] = useState<Record<number, boolean>>({});
   const [searchKeyword, setSearchKeyword] = useState('');
@@ -62,7 +69,9 @@ export const ResourceLibrary: React.FC<ResourceLibraryProps> = ({ onChangeView }
   useEffect(() => {
     const loadCourses = async () => {
       try {
-        const data = await dashboardApi.getCourses();
+        const data = currentUser?.id && !canManageMaterials
+          ? await courseApi.getStudentCourses(currentUser.id)
+          : await dashboardApi.getCourses();
         setCourses(data);
       } catch {
         // Keep an empty state when the backend is unavailable.
@@ -71,7 +80,7 @@ export const ResourceLibrary: React.FC<ResourceLibraryProps> = ({ onChangeView }
       }
     };
     loadCourses();
-  }, []);
+  }, [canManageMaterials, currentUser?.id]);
 
   const loadKnowledgePoints = async (courseId: number) => {
     if (knowledgePointsMap[courseId] || kpLoadingMap[courseId]) {
@@ -88,8 +97,27 @@ export const ResourceLibrary: React.FC<ResourceLibraryProps> = ({ onChangeView }
     }
   };
 
+  const loadCourseChapters = async (courseId: number) => {
+    if (chaptersMap[courseId] || chapterLoadingMap[courseId]) {
+      return;
+    }
+    setChapterLoadingMap(previous => ({ ...previous, [courseId]: true }));
+    try {
+      const [chapters, summary] = await Promise.all([
+        courseApi.getChapters(courseId),
+        courseApi.getStatusSummary(courseId),
+      ]);
+      setChaptersMap(previous => ({ ...previous, [courseId]: chapters }));
+      setStatusSummaryMap(previous => ({ ...previous, [courseId]: summary }));
+    } catch {
+      setChaptersMap(previous => ({ ...previous, [courseId]: [] }));
+    } finally {
+      setChapterLoadingMap(previous => ({ ...previous, [courseId]: false }));
+    }
+  };
+
   const loadCourseMaterials = async (courseId: number) => {
-    if (!canManageMaterials || materialGroupsMap[courseId] || materialLoadingMap[courseId]) {
+    if (materialGroupsMap[courseId] || materialLoadingMap[courseId]) {
       return;
     }
     setMaterialLoadingMap(previous => ({ ...previous, [courseId]: true }));
@@ -108,8 +136,10 @@ export const ResourceLibrary: React.FC<ResourceLibraryProps> = ({ onChangeView }
     setExpandedKeys(nextExpandedKeys);
     await Promise.all(nextExpandedKeys.map(async rawId => {
       const courseId = Number(rawId);
+      onCourseOpen?.(courseId);
       await Promise.all([
         loadKnowledgePoints(courseId),
+        loadCourseChapters(courseId),
         loadCourseMaterials(courseId),
       ]);
     }));
@@ -147,7 +177,10 @@ export const ResourceLibrary: React.FC<ResourceLibraryProps> = ({ onChangeView }
     }
   };
 
-  const handlePreviewMaterial = async (materialId: number, taskId: number, sourceFileName: string) => {
+  const handlePreviewMaterial = async (materialId: number, taskId: number, sourceFileName: string, courseId?: number) => {
+    if (courseId !== undefined) {
+      onMaterialOpen?.(materialId, courseId);
+    }
     setPreviewOpen(true);
     setPreviewLoading(true);
     setPreviewTaskId(taskId);
@@ -244,6 +277,10 @@ export const ResourceLibrary: React.FC<ResourceLibraryProps> = ({ onChangeView }
     return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
   };
 
+  const sortChapters = (chapters: CourseChapterInfo[]) => [...chapters].sort((first, second) =>
+    (first.sortOrder || 0) - (second.sortOrder || 0) || first.id - second.id
+  );
+
   const renderPanelHeader = (course: CourseInfo) => (
     <Row align="middle" style={{ width: '100%' }} wrap={false}>
       <Col flex="48px">
@@ -329,129 +366,176 @@ export const ResourceLibrary: React.FC<ResourceLibraryProps> = ({ onChangeView }
   };
 
   const renderMaterialsSection = (courseId: number) => {
-    if (!canManageMaterials) {
-      return null;
-    }
-
     const groups = materialGroupsMap[courseId] || [];
-    return (
-      <div style={{ marginTop: 24 }}>
-        <Text strong style={{ fontSize: 14, display: 'block', marginBottom: 16 }}>
-          <FileTextOutlined style={{ color: '#1677ff', marginRight: 8 }} />
-          Teaching Materials
-        </Text>
+    const chapters = sortChapters(chaptersMap[courseId] || []);
+    const summary = statusSummaryMap[courseId];
+    const visibleGroups = canManageMaterials
+      ? groups
+      : groups.filter(group => (group.versions || []).some(version => version.status === 'PUBLISHED'));
+    const groupedByChapter = chapters.map(chapter => ({
+      chapter,
+      groups: visibleGroups.filter(group => group.chapterId === chapter.id),
+    }));
+    const unboundGroups = visibleGroups.filter(group => !group.chapterId);
+    const sections = [
+      ...groupedByChapter,
+      ...(unboundGroups.length > 0 ? [{ chapter: null, groups: unboundGroups }] : []),
+    ].filter(section => section.groups.length > 0);
 
-        {materialLoadingMap[courseId] ? (
-          <div style={{ textAlign: 'center', padding: '24px 0' }}><Spin /></div>
-        ) : groups.length > 0 ? (
+    const renderMaterialGroup = (group: CourseTeachingMaterialGroupInfo) => {
+      const visibleVersions = canManageMaterials
+        ? (group.versions || [])
+        : (group.versions || []).filter(version => version.status === 'PUBLISHED');
+      const latestVersion = canManageMaterials
+        ? visibleVersions.find(version => version.materialId === group.latestMaterialId) || visibleVersions[0]
+        : visibleVersions[0];
+      const historyVersions = visibleVersions.filter(
+        version => version.materialId !== latestVersion?.materialId
+      );
+      const latestMaterialId = latestVersion?.materialId;
+
+      return (
+        <Card key={`material-group-${group.parseTaskId}`} size="small" bordered style={{ borderColor: '#f0f0f0' }}>
           <Space direction="vertical" style={{ width: '100%' }} size={12}>
-            {groups.map(group => {
-              const historyVersions = (group.versions || []).filter(
-                version => version.materialId !== group.latestMaterialId
-              );
-              const latestMaterialId = group.latestMaterialId;
+            <Space style={{ width: '100%', justifyContent: 'space-between' }} align="start" wrap>
+              <Space direction="vertical" size={2}>
+                <Text strong style={{ fontSize: 15 }}>
+                  {group.displayTitle || group.sourceFileName || `Task ${group.parseTaskId}`}
+                </Text>
+                <Text type="secondary" style={{ fontSize: 12 }}>
+                  Source file: {group.sourceFileName || '-'}
+                </Text>
+                <Text type="secondary" style={{ fontSize: 12 }}>
+                  Updated: {formatTimestamp(group.updatedAt)}
+                </Text>
+              </Space>
+              <Space wrap>
+                <Tag color="blue">Latest v{latestVersion?.versionNo || group.latestVersionNo || '-'}</Tag>
+                <Tag color={mapMaterialStatusColor(latestVersion?.status || group.latestStatus)}>{latestVersion?.status || group.latestStatus || 'UNKNOWN'}</Tag>
+              </Space>
+            </Space>
 
-              return (
-                <Card key={`material-group-${group.parseTaskId}`} size="small" bordered style={{ borderColor: '#f0f0f0' }}>
-                  <Space direction="vertical" style={{ width: '100%' }} size={12}>
-                    <Space style={{ width: '100%', justifyContent: 'space-between' }} align="start" wrap>
-                      <Space direction="vertical" size={2}>
-                        <Text strong style={{ fontSize: 15 }}>
-                          {group.displayTitle || group.sourceFileName || `Task ${group.parseTaskId}`}
-                        </Text>
-                        <Text type="secondary" style={{ fontSize: 12 }}>
-                          Source file: {group.sourceFileName || '-'}
-                        </Text>
-                        <Text type="secondary" style={{ fontSize: 12 }}>
-                          Updated: {formatTimestamp(group.updatedAt)}
-                        </Text>
-                      </Space>
-                      <Space wrap>
-                        <Tag color="blue">Latest v{group.latestVersionNo || '-'}</Tag>
-                        <Tag color={mapMaterialStatusColor(group.latestStatus)}>{group.latestStatus || 'UNKNOWN'}</Tag>
-                      </Space>
-                    </Space>
+            <Space wrap>
+              <Button
+                size="small"
+                onClick={() => latestMaterialId && handlePreviewMaterial(latestMaterialId, group.parseTaskId, group.sourceFileName, courseId)}
+                disabled={!latestMaterialId}
+              >
+                View
+              </Button>
+              <Button
+                size="small"
+                icon={<DownloadOutlined />}
+                onClick={() => latestMaterialId && downloadMarkdown(latestMaterialId)}
+                disabled={!latestMaterialId}
+                loading={exportingMaterialId === latestMaterialId}
+                style={{ display: canManageMaterials ? undefined : 'none' }}
+              >
+                Export Markdown
+              </Button>
+              <Button
+                size="small"
+                type="primary"
+                icon={<EditOutlined />}
+                onClick={() => handleContinueEditing(group.parseTaskId, latestMaterialId || undefined)}
+                disabled={!latestMaterialId || !onChangeView}
+                style={{ display: canManageMaterials ? undefined : 'none' }}
+              >
+                Continue Editing
+              </Button>
+            </Space>
 
-                    <Space wrap>
+            <Divider style={{ margin: '4px 0' }} />
+            <Text strong>Version History</Text>
+            {historyVersions.length > 0 ? (
+              <List
+                size="small"
+                dataSource={historyVersions}
+                renderItem={version => (
+                  <List.Item
+                    actions={[
                       <Button
+                        key="view"
                         size="small"
-                        onClick={() => latestMaterialId && handlePreviewMaterial(latestMaterialId, group.parseTaskId, group.sourceFileName)}
-                        disabled={!latestMaterialId}
+                        onClick={() => handlePreviewMaterial(version.materialId, group.parseTaskId, group.sourceFileName, courseId)}
                       >
                         View
-                      </Button>
+                      </Button>,
                       <Button
+                        key="export"
                         size="small"
-                        icon={<DownloadOutlined />}
-                        onClick={() => latestMaterialId && downloadMarkdown(latestMaterialId)}
-                        disabled={!latestMaterialId}
-                        loading={exportingMaterialId === latestMaterialId}
+                        onClick={() => downloadMarkdown(version.materialId)}
+                        loading={exportingMaterialId === version.materialId}
+                        style={{ display: canManageMaterials ? undefined : 'none' }}
                       >
-                        Export Markdown
-                      </Button>
+                        Export
+                      </Button>,
                       <Button
+                        key="edit"
                         size="small"
                         type="primary"
-                        icon={<EditOutlined />}
-                        onClick={() => handleContinueEditing(group.parseTaskId, latestMaterialId || undefined)}
-                        disabled={!latestMaterialId || !onChangeView}
+                        onClick={() => handleContinueEditing(group.parseTaskId, version.materialId)}
+                        disabled={!onChangeView}
+                        style={{ display: canManageMaterials ? undefined : 'none' }}
                       >
                         Continue Editing
-                      </Button>
+                      </Button>,
+                    ]}
+                  >
+                    <Space wrap>
+                      <Text>v{version.versionNo}</Text>
+                      <Tag color={mapMaterialStatusColor(version.status)}>{version.status}</Tag>
+                      <Text type="secondary" style={{ fontSize: 12 }}>
+                        {formatTimestamp(version.updatedAt)}
+                      </Text>
                     </Space>
+                  </List.Item>
+                )}
+              />
+            ) : (
+              <Text type="secondary">No older versions.</Text>
+            )}
+          </Space>
+        </Card>
+      );
+    };
 
-                    <Divider style={{ margin: '4px 0' }} />
-                    <Text strong>Version History</Text>
-                    {historyVersions.length > 0 ? (
-                      <List
-                        size="small"
-                        dataSource={historyVersions}
-                        renderItem={version => (
-                          <List.Item
-                            actions={[
-                              <Button
-                                key="view"
-                                size="small"
-                                onClick={() => handlePreviewMaterial(version.materialId, group.parseTaskId, group.sourceFileName)}
-                              >
-                                View
-                              </Button>,
-                              <Button
-                                key="export"
-                                size="small"
-                                onClick={() => downloadMarkdown(version.materialId)}
-                                loading={exportingMaterialId === version.materialId}
-                              >
-                                Export
-                              </Button>,
-                              <Button
-                                key="edit"
-                                size="small"
-                                type="primary"
-                                onClick={() => handleContinueEditing(group.parseTaskId, version.materialId)}
-                                disabled={!onChangeView}
-                              >
-                                Continue Editing
-                              </Button>,
-                            ]}
-                          >
-                            <Space wrap>
-                              <Text>v{version.versionNo}</Text>
-                              <Tag color={mapMaterialStatusColor(version.status)}>{version.status}</Tag>
-                              <Text type="secondary" style={{ fontSize: 12 }}>
-                                {formatTimestamp(version.updatedAt)}
-                              </Text>
-                            </Space>
-                          </List.Item>
-                        )}
-                      />
-                    ) : (
-                      <Text type="secondary">No older versions.</Text>
-                    )}
-                  </Space>
-                </Card>
-              );
-            })}
+    return (
+      <div style={{ marginTop: 24 }}>
+        <Space style={{ width: '100%', justifyContent: 'space-between', marginBottom: 16 }} align="start" wrap>
+          <Text strong style={{ fontSize: 14 }}>
+            <FileTextOutlined style={{ color: '#1677ff', marginRight: 8 }} />
+            Teaching Materials
+          </Text>
+          {summary && (
+            <Space wrap>
+              <Tag color="blue">Chapters {summary.chapterCount}</Tag>
+              <Tag color="cyan">Parse Tasks {summary.parseTaskCount}</Tag>
+              <Tag color="green">Published {summary.publishedMaterialCount}</Tag>
+              <Tag color="orange">Drafts {summary.draftMaterialCount}</Tag>
+              <Tag color="purple">Knowledge {summary.knowledgePointCount}</Tag>
+            </Space>
+          )}
+        </Space>
+
+        {materialLoadingMap[courseId] || chapterLoadingMap[courseId] ? (
+          <div style={{ textAlign: 'center', padding: '24px 0' }}><Spin /></div>
+        ) : visibleGroups.length > 0 ? (
+          <Space direction="vertical" style={{ width: '100%' }} size={16}>
+            {sections.map(section => (
+              <Card
+                key={section.chapter ? `chapter-${section.chapter.id}` : 'chapter-unbound'}
+                size="small"
+                bordered
+                title={section.chapter ? section.chapter.title : 'Unassigned Materials'}
+                extra={<Tag>{section.groups.length} item(s)</Tag>}
+                style={{ borderColor: '#f0f0f0' }}
+              >
+                <Space direction="vertical" style={{ width: '100%' }} size={12}>
+                  {section.groups.map(renderMaterialGroup)}
+                </Space>
+              </Card>
+            ))}
           </Space>
         ) : (
           <Empty description="No saved teaching materials." image={Empty.PRESENTED_IMAGE_SIMPLE} />
@@ -500,9 +584,11 @@ export const ResourceLibrary: React.FC<ResourceLibraryProps> = ({ onChangeView }
                 style={{ width: 200, borderRadius: 8 }}
                 allowClear
               />
-              <Button type="primary" icon={<PlusOutlined />} onClick={() => setShowNewCourse(true)}>
-                New Course
-              </Button>
+              {canManageMaterials && (
+                <Button type="primary" icon={<PlusOutlined />} onClick={() => setShowNewCourse(true)}>
+                  New Course
+                </Button>
+              )}
             </Space>
           </Col>
         </Row>
@@ -591,24 +677,26 @@ export const ResourceLibrary: React.FC<ResourceLibraryProps> = ({ onChangeView }
         }}
         width={720}
         extra={
-          <Space>
-            <Button
-              icon={<DownloadOutlined />}
-              onClick={() => previewMaterial && downloadMarkdown(previewMaterial.materialId)}
-              disabled={!previewMaterial}
-              loading={previewMaterial != null && exportingMaterialId === previewMaterial.materialId}
-            >
-              Export Markdown
-            </Button>
-            <Button
-              type="primary"
-              icon={<EditOutlined />}
-              onClick={() => previewTaskId && previewMaterial && handleContinueEditing(previewTaskId, previewMaterial.materialId)}
-              disabled={!previewMaterial || !previewTaskId || !onChangeView}
-            >
-              Continue Editing
-            </Button>
-          </Space>
+          canManageMaterials ? (
+            <Space>
+              <Button
+                icon={<DownloadOutlined />}
+                onClick={() => previewMaterial && downloadMarkdown(previewMaterial.materialId)}
+                disabled={!previewMaterial}
+                loading={previewMaterial != null && exportingMaterialId === previewMaterial.materialId}
+              >
+                Export Markdown
+              </Button>
+              <Button
+                type="primary"
+                icon={<EditOutlined />}
+                onClick={() => previewTaskId && previewMaterial && handleContinueEditing(previewTaskId, previewMaterial.materialId)}
+                disabled={!previewMaterial || !previewTaskId || !onChangeView}
+              >
+                Continue Editing
+              </Button>
+            </Space>
+          ) : null
         }
       >
         {previewLoading ? (

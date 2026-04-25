@@ -21,9 +21,6 @@ CREATE TABLE IF NOT EXISTS parse_task_knowledge_points (
     FULLTEXT INDEX ft_ptkp_def (point_name, definition, evidence_snippet)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='parse task knowledge points projection';
 
-ALTER TABLE parse_task_knowledge_points
-    ADD COLUMN IF NOT EXISTS resource_citations_json TEXT COMMENT 'resource citations json' AFTER evidence_snippet;
-
 -- ---------- parse_task_ideology_matches ----------
 CREATE TABLE IF NOT EXISTS parse_task_ideology_matches (
     id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT 'projection row id',
@@ -40,10 +37,6 @@ CREATE TABLE IF NOT EXISTS parse_task_ideology_matches (
     INDEX idx_ptim_ideology (ideology_element),
     FULLTEXT INDEX ft_ptim_reason (match_reason)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='parse task ideology matches projection';
-
-ALTER TABLE parse_task_ideology_matches
-    ADD COLUMN IF NOT EXISTS citation_explanation TEXT COMMENT 'citation explanation' AFTER match_reason,
-    ADD COLUMN IF NOT EXISTS resource_citations_json TEXT COMMENT 'resource citations json' AFTER citation_explanation;
 
 -- ---------- teaching_materials FULLTEXT ----------
 ALTER TABLE teaching_materials ADD FULLTEXT INDEX ft_lecture_notes (lecture_notes);

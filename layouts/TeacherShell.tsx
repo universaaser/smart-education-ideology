@@ -12,6 +12,13 @@ const KnowledgeGraph = lazy(() => import('../views/KnowledgeGraph').then((module
 const AIAssistant = lazy(() => import('../views/AIAssistant').then((module) => ({ default: module.AIAssistant })));
 const ResourceUpload = lazy(() => import('../views/ResourceUpload').then((module) => ({ default: module.ResourceUpload })));
 const ResourceLibrary = lazy(() => import('../views/ResourceLibrary').then((module) => ({ default: module.ResourceLibrary })));
+const AlertConsole = lazy(() => import('../views/AlertConsole').then((module) => ({ default: module.AlertConsole })));
+const SourceManagement = lazy(() => import('../views/SourceManagement').then((module) => ({ default: module.SourceManagement })));
+const KeywordTasks = lazy(() => import('../views/KeywordTasks').then((module) => ({ default: module.KeywordTasks })));
+const MatchReview = lazy(() => import('../views/MatchReview').then((module) => ({ default: module.MatchReview })));
+const ModelSettings = lazy(() => import('../views/ModelSettings').then((module) => ({ default: module.ModelSettings })));
+const AdminConsole = lazy(() => import('../views/AdminConsole').then((module) => ({ default: module.AdminConsole })));
+const CourseManagement = lazy(() => import('../views/CourseManagement').then((module) => ({ default: module.CourseManagement })));
 
 export const TeacherShell: React.FC = () => {
   const { currentUser, roleUi, logout, updateAvatar } = useAuth();
@@ -19,6 +26,7 @@ export const TeacherShell: React.FC = () => {
   const [crawlStatus, setCrawlStatus] = useState<CrawlTaskStatusInfo | null>(null);
   const [collapsed, setCollapsed] = useState(false);
   const [resourceUploadTarget, setResourceUploadTarget] = useState<ResourceUploadTarget | null>(null);
+  const [courseManagementCourseId, setCourseManagementCourseId] = useState<number | null>(null);
 
   const fetchCrawlStatus = useCallback(async () => {
     try {
@@ -46,15 +54,14 @@ export const TeacherShell: React.FC = () => {
 
   const handleChangeView: ViewChangeHandler = (view, options) => {
     setCurrentView(view);
-    if (view === View.RESOURCE_UPLOAD) {
-      setResourceUploadTarget(options?.resourceUploadTarget ?? null);
-    }
+    setResourceUploadTarget(view === View.RESOURCE_UPLOAD ? options?.resourceUploadTarget ?? null : null);
+    setCourseManagementCourseId(view === View.COURSE_MANAGEMENT ? options?.courseId ?? null : null);
   };
 
   const renderView = () => {
     switch (currentView) {
       case View.DASHBOARD:
-        return <Dashboard onChangeView={view => handleChangeView(view)} />;
+        return <Dashboard onChangeView={handleChangeView} />;
       case View.KNOWLEDGE_GRAPH:
         return <KnowledgeGraph crawlStatus={crawlStatus} refreshCrawlStatus={fetchCrawlStatus} />;
       case View.AI_ASSISTANT:
@@ -63,6 +70,20 @@ export const TeacherShell: React.FC = () => {
         return <ResourceUpload userId={currentUser?.id} resourceUploadTarget={resourceUploadTarget || undefined} />;
       case View.COURSE_LIBRARY:
         return <ResourceLibrary onChangeView={handleChangeView} />;
+      case View.COURSE_MANAGEMENT:
+        return <CourseManagement courseId={courseManagementCourseId} onChangeView={handleChangeView} />;
+      case View.ALERTS:
+        return <AlertConsole />;
+      case View.SOURCE_MANAGEMENT:
+        return <SourceManagement />;
+      case View.KEYWORD_TASKS:
+        return <KeywordTasks />;
+      case View.MATCH_REVIEW:
+        return <MatchReview />;
+      case View.MODEL_SETTINGS:
+        return <ModelSettings />;
+      case View.ADMIN_CONSOLE:
+        return <AdminConsole />;
       default:
         return <Dashboard onChangeView={view => handleChangeView(view)} />;
     }
@@ -75,6 +96,13 @@ export const TeacherShell: React.FC = () => {
       case View.AI_ASSISTANT: return 'AI Teaching Assistant';
       case View.RESOURCE_UPLOAD: return 'Resource Upload';
       case View.COURSE_LIBRARY: return 'Course Library';
+      case View.ALERTS: return 'Student Alert Console';
+      case View.SOURCE_MANAGEMENT: return 'Source Management';
+      case View.KEYWORD_TASKS: return 'Keyword Tasks';
+      case View.MATCH_REVIEW: return 'Match Review';
+      case View.COURSE_MANAGEMENT: return 'Course Management';
+      case View.MODEL_SETTINGS: return 'Model Settings';
+      case View.ADMIN_CONSOLE: return 'Admin Console';
       default: return 'Smart Ideology Education';
     }
   };

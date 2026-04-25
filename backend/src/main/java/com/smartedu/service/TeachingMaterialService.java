@@ -104,6 +104,8 @@ public class TeachingMaterialService {
     @Transactional
     public TeachingMaterialDraftDto saveDraft(Long taskId, TeachingMaterialSaveRequestDto request) {
         ParseTask task = requireParseTask(taskId);
+        requireMaterialUserId(task);
+        TeachingMaterialSaveRequestDto normalizedRequest = normalizeSaveRequest(request);
         PipelineResultDto pipeline = resolveEffectivePipeline(task);
         List<TeachingTraceItemDto> traceItems = buildTraceItems(taskId, pipeline);
         TeachingMaterial latest = findLatestByTaskId(taskId);
@@ -113,7 +115,8 @@ public class TeachingMaterialService {
             created.setParseTaskId(taskId);
             created.setUserId(task.getUserId());
             created.setCourseId(task.getCourseId());
-            applyEditableContent(created, request, task.getFileName());
+            created.setChapterId(normalizedRequest.getChapterId());
+            applyEditableContent(created, normalizedRequest, task.getFileName());
             created.setDocumentStructureJson(writeJsonSafely(pipeline == null ? null : pipeline.getDocumentStructure()));
             created.setKnowledgePointsJson(writeJsonSafely(pipeline == null ? null : pipeline.getKnowledgePoints()));
             created.setIdeologyMatchesJson(writeJsonSafely(pipeline == null ? null : pipeline.getIdeologyMatches()));
@@ -138,7 +141,8 @@ public class TeachingMaterialService {
             draft.setParseTaskId(taskId);
             draft.setUserId(task.getUserId());
             draft.setCourseId(task.getCourseId());
-            applyEditableContent(draft, request, task.getFileName());
+            draft.setChapterId(normalizedRequest.getChapterId());
+            applyEditableContent(draft, normalizedRequest, task.getFileName());
             draft.setDocumentStructureJson(writeJsonSafely(pipeline == null ? null : pipeline.getDocumentStructure()));
             draft.setKnowledgePointsJson(writeJsonSafely(pipeline == null ? null : pipeline.getKnowledgePoints()));
             draft.setIdeologyMatchesJson(writeJsonSafely(pipeline == null ? null : pipeline.getIdeologyMatches()));
@@ -155,7 +159,8 @@ public class TeachingMaterialService {
         }
 
         latest.setCourseId(task.getCourseId());
-        applyEditableContent(latest, request, task.getFileName());
+        latest.setChapterId(normalizedRequest.getChapterId());
+        applyEditableContent(latest, normalizedRequest, task.getFileName());
         latest.setDocumentStructureJson(writeJsonSafely(pipeline == null ? null : pipeline.getDocumentStructure()));
         latest.setKnowledgePointsJson(writeJsonSafely(pipeline == null ? null : pipeline.getKnowledgePoints()));
         latest.setIdeologyMatchesJson(writeJsonSafely(pipeline == null ? null : pipeline.getIdeologyMatches()));
@@ -174,8 +179,10 @@ public class TeachingMaterialService {
     @Transactional
     public TeachingMaterialViewDto savePublishedVersion(Long taskId, TeachingMaterialSaveRequestDto request) {
         ParseTask task = requireParseTask(taskId);
-        requireCompletePublishedQuestions(request.getQuestions());
-        requireCourseMaterialRules(task.getCourseId(), request);
+        requireMaterialUserId(task);
+        TeachingMaterialSaveRequestDto normalizedRequest = normalizeSaveRequest(request);
+        requireCompletePublishedQuestions(normalizedRequest.getQuestions());
+        requireCourseMaterialRules(task.getCourseId(), normalizedRequest);
         PipelineResultDto pipeline = resolveEffectivePipeline(task);
         List<TeachingTraceItemDto> traceItems = buildTraceItems(taskId, pipeline);
         TeachingMaterial latest = findLatestByTaskId(taskId);
@@ -190,7 +197,8 @@ public class TeachingMaterialService {
         version.setParseTaskId(taskId);
         version.setUserId(task.getUserId());
         version.setCourseId(task.getCourseId());
-        applyEditableContent(version, request, task.getFileName());
+        version.setChapterId(normalizedRequest.getChapterId());
+        applyEditableContent(version, normalizedRequest, task.getFileName());
         version.setDocumentStructureJson(writeJsonSafely(pipeline == null ? null : pipeline.getDocumentStructure()));
         version.setKnowledgePointsJson(writeJsonSafely(pipeline == null ? null : pipeline.getKnowledgePoints()));
         version.setIdeologyMatchesJson(writeJsonSafely(pipeline == null ? null : pipeline.getIdeologyMatches()));
@@ -269,6 +277,7 @@ public class TeachingMaterialService {
             CourseTeachingMaterialGroupDto group = new CourseTeachingMaterialGroupDto();
             group.setParseTaskId(entry.getKey());
             group.setCourseId(courseId);
+            group.setChapterId(latest.getChapterId());
             group.setDisplayTitle(displayTitle);
             group.setSourceFileName(sourceFileName);
             group.setLatestMaterialId(latest.getId());
@@ -409,11 +418,13 @@ public class TeachingMaterialService {
             latest.setParseTaskId(taskId);
             latest.setUserId(task.getUserId());
             latest.setCourseId(source.getCourseId() == null ? task.getCourseId() : source.getCourseId());
+            latest.setChapterId(source.getChapterId());
             latest.setVersionNo(source.getVersionNo() == null ? 1 : source.getVersionNo());
             latest.setIsLatest(1);
             latest.setCreatedAt(LocalDateTime.now());
         }
 
+        latest.setChapterId(source.getChapterId());
         latest.setTitle(source.getTitle());
         latest.setLectureNotes(source.getLectureNotes());
         latest.setCasesJson(source.getCasesJson());
@@ -444,6 +455,16 @@ public class TeachingMaterialService {
         return task;
     }
 
+    private void requireMaterialUserId(ParseTask task) {
+        if (task == null || task.getUserId() == null) {
+            throw new IllegalArgumentException("Task user id is required before saving teaching material");
+        }
+    }
+
+    private TeachingMaterialSaveRequestDto normalizeSaveRequest(TeachingMaterialSaveRequestDto request) {
+        return request == null ? new TeachingMaterialSaveRequestDto() : request;
+    }
+
     private PipelineResultDto resolveEffectivePipeline(ParseTask task) {
         PipelineResultDto fallback = aiIntelligenceService.getPipelineResult(task.getId());
         return parseTaskCorrectionService.resolveEffectivePipelineResult(task, fallback);
@@ -464,6 +485,7 @@ public class TeachingMaterialService {
         draft.setParseTaskId(task.getId());
         draft.setUserId(task.getUserId());
         draft.setCourseId(task.getCourseId());
+        draft.setChapterId(null);
         draft.setTitle(task.getFileName());
         draft.setLectureNotes(pipeline != null && pipeline.getTeachingArtifacts() != null
                 ? safe(pipeline.getTeachingArtifacts().getLectureNotes())
@@ -623,6 +645,7 @@ public class TeachingMaterialService {
         draft.setParseTaskId(material.getParseTaskId());
         draft.setUserId(material.getUserId());
         draft.setCourseId(material.getCourseId());
+        draft.setChapterId(material.getChapterId());
         draft.setTitle(safe(material.getTitle()));
         draft.setLectureNotes(safe(material.getLectureNotes()));
         draft.setCases(readCases(material.getCasesJson()));
@@ -641,6 +664,7 @@ public class TeachingMaterialService {
         view.setParseTaskId(material.getParseTaskId());
         view.setUserId(material.getUserId());
         view.setCourseId(material.getCourseId());
+        view.setChapterId(material.getChapterId());
         view.setTitle(safe(material.getTitle()));
         view.setLectureNotes(safe(material.getLectureNotes()));
         view.setCases(readCases(material.getCasesJson()));
@@ -877,13 +901,21 @@ public class TeachingMaterialService {
         }
 
         for (TeachingTraceItemDto item : traceItems) {
+            if (item == null) {
+                continue;
+            }
+            String knowledgePointName = trimToLength(safe(item.getKnowledgePointName()), 300);
+            String ideologyElement = trimToLength(safe(item.getIdeologyElement()), 300);
+            if (knowledgePointName.isBlank() || ideologyElement.isBlank()) {
+                continue;
+            }
             TeachingMaterialTrace row = new TeachingMaterialTrace();
             row.setMaterialId(materialId);
             row.setParseTaskId(taskId);
             row.setCourseId(courseId);
             row.setKnowledgePointId(item.getKnowledgePointId());
-            row.setKnowledgePointName(trimToLength(safe(item.getKnowledgePointName()), 300));
-            row.setIdeologyElement(trimToLength(safe(item.getIdeologyElement()), 300));
+            row.setKnowledgePointName(knowledgePointName);
+            row.setIdeologyElement(ideologyElement);
             row.setEvidenceSnippet(trimToLength(safe(item.getEvidenceSnippet()), 1000));
             row.setMatchReason(trimToLength(safe(item.getMatchReason()), 1000));
             row.setResourceTitle(trimToLength(safe(item.getResourceTitle()), 300));

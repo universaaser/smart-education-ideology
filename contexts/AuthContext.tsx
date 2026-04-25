@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
-import { CurrentUser, RoleUi } from '../types';
+import { CurrentUser, Role, RoleUi, View } from '../types';
 import { authApi, getToken, removeToken } from '../services/api';
 
 export interface AuthContextType {
@@ -25,10 +25,21 @@ const MOCK_BOOTSTRAP = {
     realName: 'Mock Teacher',
   },
   roleUi: {
-    role: 'TEACHER',
-    roleLabel: '教师',
-    defaultView: 'DASHBOARD',
-    allowedViews: ['DASHBOARD', 'KNOWLEDGE_GRAPH', 'AI_ASSISTANT', 'RESOURCE_UPLOAD', 'COURSE_LIBRARY'],
+    role: Role.TEACHER,
+    roleLabel: 'Teacher',
+    defaultView: View.DASHBOARD,
+    allowedViews: [
+      View.DASHBOARD,
+      View.KNOWLEDGE_GRAPH,
+      View.AI_ASSISTANT,
+      View.RESOURCE_UPLOAD,
+      View.COURSE_LIBRARY,
+      View.COURSE_MANAGEMENT,
+      View.ALERTS,
+      View.SOURCE_MANAGEMENT,
+      View.KEYWORD_TASKS,
+      View.MATCH_REVIEW,
+    ],
     capabilities: {
       canViewDashboard: true,
       canUseAiAssistant: true,
@@ -38,12 +49,17 @@ const MOCK_BOOTSTRAP = {
       canUploadResource: true,
       canTriggerCrawlUpdate: true,
       canCreateCourse: true,
-      canManageUsers: true,
+      canManageUsers: false,
       canViewStudentAlerts: true,
-      canSubmitLearningActivity: true,
+      canManageSources: true,
+      canManageKeywordTasks: true,
+      canReviewMatches: true,
+      canManageAiProviders: false,
+      canManageAdminConsole: false,
+      canSubmitLearningActivity: false,
     }
   }
-} as any;
+} satisfies { user: CurrentUser; roleUi: RoleUi };
 
 export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [isLoggedIn, setIsLoggedIn] = useState(false);

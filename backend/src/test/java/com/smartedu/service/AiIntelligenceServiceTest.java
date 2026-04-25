@@ -216,6 +216,19 @@ class AiIntelligenceServiceTest {
   }
 
   @Test
+  void shouldSerializeParsedContentAsJsonWithRawMarkdown() throws Exception {
+    Method method = AiIntelligenceService.class.getDeclaredMethod("writeParsedContentJson", String.class, String.class, String.class);
+    method.setAccessible(true);
+
+    String result = (String) method.invoke(aiIntelligenceService, "demo.md", "# Demo\n\nBody", "FALLBACK_LLM");
+    var node = new ObjectMapper().readTree(result);
+
+    assertEquals("demo.md", node.path("title").asText());
+    assertEquals("# Demo\n\nBody", node.path("rawMarkdown").asText());
+    assertEquals("FALLBACK_LLM", node.path("parseMode").asText());
+  }
+
+  @Test
   void shouldExtractChatCompletionTextFromArrayContent() throws Exception {
     Method method = AiIntelligenceService.class.getDeclaredMethod("extractTextContent",
         com.fasterxml.jackson.databind.JsonNode.class);

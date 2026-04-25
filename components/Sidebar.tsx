@@ -2,12 +2,18 @@ import React, { useMemo, useState } from 'react';
 import { Avatar, Button, Menu, Tooltip, Typography, Upload, type MenuProps } from 'antd';
 import {
   BookOutlined,
+  AlertOutlined,
+  CloudServerOutlined,
   CloudUploadOutlined,
+  FileSearchOutlined,
+  CheckCircleOutlined,
   DashboardOutlined,
+  SettingOutlined,
   HomeOutlined,
   LogoutOutlined,
   RobotOutlined,
   ShareAltOutlined,
+  TeamOutlined,
   UserOutlined,
 } from '@ant-design/icons';
 import { CurrentUser, NavItem, View, ViewChangeHandler } from '../types';
@@ -32,6 +38,12 @@ const ALL_NAV_ITEMS: (NavItem & { antIcon: React.ReactNode })[] = [
   { id: View.AI_ASSISTANT, label: 'AI Assistant', icon: 'smart_toy', antIcon: <RobotOutlined />, isBeta: true },
   { id: View.RESOURCE_UPLOAD, label: 'Resource Upload', icon: 'cloud_upload', antIcon: <CloudUploadOutlined /> },
   { id: View.COURSE_LIBRARY, label: 'Course Library', icon: 'library_books', antIcon: <BookOutlined /> },
+  { id: View.ALERTS, label: 'Student Alerts', icon: 'warning', antIcon: <AlertOutlined /> },
+  { id: View.SOURCE_MANAGEMENT, label: 'Source Management', icon: 'cloud_sync', antIcon: <CloudServerOutlined /> },
+  { id: View.KEYWORD_TASKS, label: 'Keyword Tasks', icon: 'manage_search', antIcon: <FileSearchOutlined /> },
+  { id: View.MATCH_REVIEW, label: 'Match Review', icon: 'fact_check', antIcon: <CheckCircleOutlined /> },
+  { id: View.MODEL_SETTINGS, label: 'Model Settings', icon: 'settings', antIcon: <SettingOutlined /> },
+  { id: View.ADMIN_CONSOLE, label: 'Admin Console', icon: 'admin_panel_settings', antIcon: <TeamOutlined /> },
 ];
 
 export const AppSidebar: React.FC<SidebarProps> = ({

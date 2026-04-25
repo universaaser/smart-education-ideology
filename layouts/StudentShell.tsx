@@ -4,6 +4,7 @@ import { View, ViewChangeHandler } from '../types';
 import { AppSidebar } from '../components/Sidebar';
 import { AppHeader } from '../components/Header';
 import { useAuth } from '../contexts/AuthContext';
+import { TrackingProvider, useTracking } from '../contexts/TrackingContext';
 
 const { Sider, Content } = Layout;
 const KnowledgeGraph = lazy(() => import('../views/KnowledgeGraph').then((module) => ({ default: module.KnowledgeGraph })));
@@ -11,8 +12,9 @@ const AIAssistant = lazy(() => import('../views/AIAssistant').then((module) => (
 const ResourceLibrary = lazy(() => import('../views/ResourceLibrary').then((module) => ({ default: module.ResourceLibrary })));
 const StudentHome = lazy(() => import('../views/StudentHome').then((module) => ({ default: module.StudentHome })));
 
-export const StudentShell: React.FC = () => {
+const StudentShellContent: React.FC = () => {
   const { currentUser, roleUi, logout, updateAvatar } = useAuth();
+  const { track } = useTracking();
   const [collapsed, setCollapsed] = useState(false);
   const [currentView, setCurrentView] = useState<View>(roleUi?.defaultView || View.STUDENT_HOME);
   const [highlightNodeIds, setHighlightNodeIds] = useState<number[]>([]);
@@ -23,6 +25,18 @@ export const StudentShell: React.FC = () => {
       setCurrentView(roleUi.defaultView || View.STUDENT_HOME);
     }
   }, [currentView, roleUi]);
+
+  useEffect(() => {
+    const startedAt = Date.now();
+    track({ eventType: 'page_stay', payload: { view: currentView } });
+    return () => {
+      track({
+        eventType: 'page_stay',
+        durationSeconds: Math.max(1, Math.round((Date.now() - startedAt) / 1000)),
+        payload: { view: currentView },
+      });
+    };
+  }, [currentView, track]);
 
   const handleChangeView: ViewChangeHandler = (view, options) => {
     setCurrentView(view);
@@ -43,12 +57,19 @@ export const StudentShell: React.FC = () => {
             crawlStatus={null}
             refreshCrawlStatus={async () => {}}
             highlightNodeIds={highlightNodeIds}
+            onNodeView={(node) => track({ eventType: 'knowledge_view', knowledgePointId: node.id, payload: { nodeName: node.name } })}
           />
         );
       case View.AI_ASSISTANT:
-        return <AIAssistant />;
+        return <AIAssistant onQuestionSubmit={(question) => track({ eventType: 'ai_ask', payload: { questionLength: question.length } })} />;
       case View.COURSE_LIBRARY:
-        return <ResourceLibrary onChangeView={handleChangeView} />;
+        return (
+          <ResourceLibrary
+            onChangeView={handleChangeView}
+            onMaterialOpen={(materialId, courseId) => track({ eventType: 'material_open', courseId, payload: { materialId } })}
+            onCourseOpen={(courseId) => track({ eventType: 'material_open', courseId, payload: { scope: 'course' } })}
+          />
+        );
       default:
         return <StudentHome onChangeView={handleChangeView} />;
     }
@@ -101,3 +122,9 @@ export const StudentShell: React.FC = () => {
     </Layout>
   );
 };
+
+export const StudentShell: React.FC = () => (
+  <TrackingProvider>
+    <StudentShellContent />
+  </TrackingProvider>
+);

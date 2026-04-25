@@ -7,6 +7,7 @@ CREATE TABLE IF NOT EXISTS teaching_materials (
     id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT 'material id',
     parse_task_id BIGINT NOT NULL COMMENT 'related parse task id',
     user_id BIGINT NOT NULL COMMENT 'teacher user id',
+    chapter_id BIGINT NULL COMMENT 'optional course chapter id',
     title VARCHAR(300) NOT NULL COMMENT 'material title',
     lecture_notes TEXT COMMENT 'editable lecture notes',
     cases_json TEXT COMMENT 'editable cases in json array',
@@ -26,5 +27,6 @@ CREATE TABLE IF NOT EXISTS teaching_materials (
     INDEX idx_tm_task_latest (parse_task_id, is_latest),
     INDEX idx_tm_task_version (parse_task_id, version_no),
     INDEX idx_tm_user (user_id),
+    INDEX idx_tm_chapter (chapter_id),
     INDEX idx_tm_status (status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='teaching materials table';

@@ -27,6 +27,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
 
 /**
@@ -386,7 +387,11 @@ public class ParseTaskCorrectionService {
             aiPipelineJsonValidator.parseObject(
                     questionNode.toString(),
                     List.of("stem", "referenceAnswer", "scoringPoints"),
-                    List.of("stem", "referenceAnswer", "scoringPoints"));
+                    List.of("questionType", "difficulty", "knowledgePointId", "stem", "options", "referenceAnswer",
+                            "scoringPoints"));
+            if (questionNode.get("options") != null && !questionNode.get("options").isArray()) {
+                throw new RuntimeException("options must be an array");
+            }
             if (questionNode.get("scoringPoints") == null || !questionNode.get("scoringPoints").isArray()) {
                 throw new RuntimeException("scoringPoints must be an array");
             }
@@ -424,7 +429,11 @@ public class ParseTaskCorrectionService {
                 continue;
             }
             TeachingArtifactsDto.QuestionDto item = new TeachingArtifactsDto.QuestionDto();
+            item.setQuestionType(normalizeQuestionType(question.getQuestionType()));
+            item.setDifficulty(normalizeDifficulty(question.getDifficulty()));
+            item.setKnowledgePointId(question.getKnowledgePointId());
             item.setStem(trimToLength(question.getStem(), 2000));
+            item.setOptions(normalizeShortList(question.getOptions(), 8, 1000));
             item.setReferenceAnswer(trimToLength(question.getReferenceAnswer(), 3000));
             item.setScoringPoints(normalizeShortList(question.getScoringPoints(), 12, 2000));
             normalized.add(item);
@@ -535,5 +544,21 @@ public class ParseTaskCorrectionService {
             return "";
         }
         return node.asText().trim();
+    }
+
+    private String normalizeQuestionType(String value) {
+        String normalized = safe(value).toUpperCase(Locale.ROOT);
+        if (List.of("SINGLE_CHOICE", "MULTIPLE_CHOICE", "SHORT_ANSWER", "CASE_ANALYSIS").contains(normalized)) {
+            return normalized;
+        }
+        return "SHORT_ANSWER";
+    }
+
+    private String normalizeDifficulty(String value) {
+        String normalized = safe(value).toUpperCase(Locale.ROOT);
+        if (List.of("EASY", "MEDIUM", "HARD").contains(normalized)) {
+            return normalized;
+        }
+        return "MEDIUM";
     }
 }

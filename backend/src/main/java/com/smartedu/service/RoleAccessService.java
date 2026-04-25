@@ -26,7 +26,7 @@ public class RoleAccessService {
 
     private String resolveDefaultView(String role) {
         return switch (role) {
-            case UserRoleConstants.STUDENT -> "KNOWLEDGE_GRAPH";
+            case UserRoleConstants.STUDENT -> "STUDENT_HOME";
             case UserRoleConstants.ADMIN -> "DASHBOARD";
             default -> "DASHBOARD";
         };
@@ -35,6 +35,7 @@ public class RoleAccessService {
     private List<String> resolveAllowedViews(String role) {
         return switch (role) {
             case UserRoleConstants.STUDENT -> List.of(
+                    "STUDENT_HOME",
                     "KNOWLEDGE_GRAPH",
                     "AI_ASSISTANT",
                     "COURSE_LIBRARY");
@@ -43,13 +44,25 @@ public class RoleAccessService {
                     "KNOWLEDGE_GRAPH",
                     "AI_ASSISTANT",
                     "RESOURCE_UPLOAD",
-                    "COURSE_LIBRARY");
+                    "COURSE_LIBRARY",
+                    "COURSE_MANAGEMENT",
+                    "ALERTS",
+                    "SOURCE_MANAGEMENT",
+                    "KEYWORD_TASKS",
+                    "MATCH_REVIEW",
+                    "MODEL_SETTINGS",
+                    "ADMIN_CONSOLE");
             default -> List.of(
                     "DASHBOARD",
                     "KNOWLEDGE_GRAPH",
                     "AI_ASSISTANT",
                     "RESOURCE_UPLOAD",
-                    "COURSE_LIBRARY");
+                    "COURSE_LIBRARY",
+                    "COURSE_MANAGEMENT",
+                    "ALERTS",
+                    "SOURCE_MANAGEMENT",
+                    "KEYWORD_TASKS",
+                    "MATCH_REVIEW");
         };
     }
 
@@ -69,6 +82,11 @@ public class RoleAccessService {
         capabilities.put("canCreateCourse", isTeacher || isAdmin);
         capabilities.put("canManageUsers", isAdmin);
         capabilities.put("canViewStudentAlerts", isTeacher || isAdmin);
+        capabilities.put("canManageSources", isTeacher || isAdmin);
+        capabilities.put("canManageKeywordTasks", isTeacher || isAdmin);
+        capabilities.put("canReviewMatches", isTeacher || isAdmin);
+        capabilities.put("canManageAiProviders", isAdmin);
+        capabilities.put("canManageAdminConsole", isAdmin);
         capabilities.put("canSubmitLearningActivity", isStudent);
         return capabilities;
     }

@@ -31,7 +31,14 @@
       "Bash(chmod +x \"/c/Users/yangsirly/bin/jq.exe\")",
       "Bash(C:/Users/yangsirly/.claude/plugins/cache/claude-plugins-official/ralph-loop/1.0.0/scripts/setup-ralph-loop.sh *)",
       "Bash(git diff *)",
-      "Bash(perl -ne 'print if $. < 1000')"
+      "Bash(perl -ne 'print if $. < 1000')",
+      "Bash(git restore *)",
+      "Bash(git clean *)",
+      "Bash(./mvnw *)",
+      "PowerShell(& \"E:\\\\study\\\\smart-education-ideology\\\\scripts\\\\update_database.ps1\" -User root -Password root -DryRun)",
+      "PowerShell(& \"E:\\\\study\\\\smart-education-ideology\\\\scripts\\\\update_database.ps1\" -User root -Password root -DryRun -MysqlPath \"C:\\\\Program Files\\\\MySQL\\\\MySQL Server 8.0\\\\bin\\\\mysql.exe\" -MysqldumpPath \"C:\\\\Program Files\\\\MySQL\\\\MySQL Server 8.0\\\\bin\\\\mysqldump.exe\")",
+      "PowerShell(& \"E:\\\\study\\\\smart-education-ideology\\\\scripts\\\\update_database.ps1\" -User root -Password root -MysqlPath \"C:\\\\Program Files\\\\MySQL\\\\MySQL Server 8.0\\\\bin\\\\mysql.exe\" -MysqldumpPath \"C:\\\\Program Files\\\\MySQL\\\\MySQL Server 8.0\\\\bin\\\\mysqldump.exe\")",
+      "PowerShell(& \"C:\\\\Program Files\\\\MySQL\\\\MySQL Server 8.0\\\\bin\\\\mysql.exe\" --protocol=TCP --host=127.0.0.1 --port=3306 --user=root --password=root --database=smart_education --batch --skip-column-names --execute=\"SELECT filename, applied_mode FROM schema_migrations WHERE filename IN \\('migration_material_trace_and_course_binding.sql','migration_teaching_material_trace_resource_columns.sql'\\) ORDER BY filename; SELECT column_name FROM information_schema.columns WHERE table_schema = DATABASE\\(\\) AND table_name = 'teaching_material_traces' AND column_name IN \\('resource_title','resource_source','resource_source_url','resource_quoted_excerpt','citation_explanation'\\) ORDER BY ordinal_position;\")"
     ]
   }
 }

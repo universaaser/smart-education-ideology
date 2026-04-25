@@ -1,22 +1,41 @@
 package com.smartedu.service;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.smartedu.dto.StudentAlertRecordDto;
+import com.smartedu.dto.StudentAlertSummaryDto;
 import com.smartedu.entity.StudentActivity;
+import com.smartedu.entity.StudentActivityEvent;
+import com.smartedu.entity.StudentAlertRecord;
+import com.smartedu.mapper.StudentActivityEventMapper;
 import com.smartedu.mapper.StudentActivityMapper;
+import com.smartedu.mapper.StudentAlertRecordMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
 import java.math.BigDecimal;
-import java.util.*;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 /**
  * 预警服务
- * 
+ *
  * <p>
  * 实现学生自适应学习监测和预警逻辑
  * <p>
  * 基于三维评估指标：学习时长、答题正确率、专注度
- * 
+ *
  * @author SmartEducation Team
  */
 @Slf4j
@@ -25,11 +44,16 @@ import java.util.*;
 public class AlertService {
 
     private final StudentActivityMapper studentActivityMapper;
+    private final StudentActivityEventMapper studentActivityEventMapper;
+    private final StudentAlertRecordMapper studentAlertRecordMapper;
+    private final ObjectMapper objectMapper;
 
     // 预警阈值常量
     private static final double FOCUS_WARNING_THRESHOLD = 60.0; // 专注度低于60%触发警告
     private static final double CORRECT_RATE_WARNING_THRESHOLD = 50.0; // 正确率低于50%触发警告
     private static final int STUDY_DURATION_MIN_THRESHOLD = 10; // 最短学习时长（分钟）
+    private static final Set<String> ACTIVE_STATUSES = Set.of("PENDING", "PROCESSING");
+    private static final Set<String> SUPPORTED_STATUSES = Set.of("PENDING", "PROCESSING", "RESOLVED", "IGNORED");
 
     // 情绪权重配置
     private static final Map<String, Double> EMOTION_WEIGHTS;
@@ -44,10 +68,10 @@ public class AlertService {
 
     /**
      * 计算预警等级
-     * 
+     *
      * <p>
      * 基于三维评估指标和情绪状态计算综合预警等级
-     * 
+     *
      * @param focusScore    专注度评分（0-100）
      * @param correctRate   答题正确率（0-100）
      * @param studyDuration 学习时长（分钟）
@@ -119,7 +143,7 @@ public class AlertService {
 
     /**
      * 分析学生学习行为并更新预警状态
-     * 
+     *
      * @param activity 学生活动记录
      * @return 更新后的活动记录
      */
@@ -148,6 +172,143 @@ public class AlertService {
         return activity;
     }
 
+    public List<StudentAlertRecordDto> evaluateStudentAlerts(Long studentId, Long courseId) {
+        LocalDate today = LocalDate.now();
+        LocalDateTime start = today.minusDays(6).atStartOfDay();
+        LocalDateTime end = today.atTime(LocalTime.MAX);
+        List<StudentActivityEvent> events = studentActivityEventMapper.selectList(new LambdaQueryWrapper<StudentActivityEvent>()
+                .eq(StudentActivityEvent::getStudentId, studentId)
+                .eq(StudentActivityEvent::getCourseId, courseId)
+                .ge(StudentActivityEvent::getOccurredAt, start)
+                .le(StudentActivityEvent::getOccurredAt, end));
+
+        long eventCount = events.size();
+        long studySeconds = events.stream()
+                .filter(event -> event.getDurationSeconds() != null)
+                .mapToLong(StudentActivityEvent::getDurationSeconds)
+                .sum();
+        long materialOpenCount = countByType(events, "material_open");
+        long knowledgeViewCount = countByType(events, "knowledge_view");
+        long aiAskCount = countByType(events, "ai_ask");
+        List<StudentActivityEvent> quizEvents = events.stream()
+                .filter(event -> "answer_submit".equals(event.getEventType()))
+                .toList();
+        long quizAnswerCount = quizEvents.size();
+        long correctQuizAnswerCount = quizEvents.stream()
+                .filter(this::isCorrectQuizAnswer)
+                .count();
+        double quizCorrectRate = quizAnswerCount == 0 ? 0D : correctQuizAnswerCount * 100D / quizAnswerCount;
+
+        List<StudentAlertRecord> records = new ArrayList<>();
+        String evidence = evidenceOf(eventCount, studySeconds, materialOpenCount, knowledgeViewCount, aiAskCount);
+        if (eventCount == 0) {
+            records.add(buildRecord(studentId, courseId, "LOW_ACTIVITY", 3,
+                    "No learning activity detected",
+                    "No student learning activity was captured in the last 7 days.",
+                    "Start with one course resource and ask the AI assistant for help after reading.",
+                    evidence));
+        } else {
+            if (studySeconds < 600) {
+                records.add(buildRecord(studentId, courseId, "LOW_STUDY_TIME", 2,
+                        "Low study time",
+                        "The student has less than 10 minutes of captured study time in the last 7 days.",
+                        "Spend at least 10 minutes reviewing the current course materials today.",
+                        evidence));
+            }
+            if (aiAskCount >= 3 && knowledgeViewCount == 0) {
+                records.add(buildRecord(studentId, courseId, "CONFUSION_RISK", 2,
+                        "Possible learning confusion",
+                        "The student asked multiple AI questions without opening knowledge points.",
+                        "Open the knowledge graph first, then continue asking focused AI questions.",
+                        evidence));
+            }
+            if (materialOpenCount == 0) {
+                records.add(buildRecord(studentId, courseId, "LOW_RESOURCE_ENGAGEMENT", 1,
+                        "No material engagement",
+                        "The student has activity records but no course material opening event.",
+                        "Open one course material and record key points before the next activity.",
+                        evidence));
+            }
+            if (quizAnswerCount >= 3 && quizCorrectRate < CORRECT_RATE_WARNING_THRESHOLD) {
+                records.add(buildRecord(studentId, courseId, "LOW_QUIZ_ACCURACY", 2,
+                        "Low quiz accuracy",
+                        "The student's quiz accuracy is below 50% in recent answer records.",
+                        "Review the weak knowledge points and retry the related quiz questions.",
+                        evidence));
+            }
+        }
+
+        List<StudentAlertRecord> savedRecords = new ArrayList<>();
+        for (StudentAlertRecord record : records) {
+            if (!hasActiveAlert(record.getStudentId(), record.getCourseId(), record.getAlertType())) {
+                studentAlertRecordMapper.insert(record);
+                savedRecords.add(record);
+            }
+        }
+        return savedRecords.stream().map(this::toDto).toList();
+    }
+
+    private boolean isCorrectQuizAnswer(StudentActivityEvent event) {
+        if (event.getPayloadJson() == null || event.getPayloadJson().isBlank()) {
+            return false;
+        }
+        try {
+            Map<String, Object> payload = objectMapper.readValue(event.getPayloadJson(), new TypeReference<>() {});
+            return Boolean.TRUE.equals(payload.get("isCorrect"));
+        } catch (JsonProcessingException e) {
+            return false;
+        }
+    }
+
+    public StudentAlertSummaryDto getAlertSummary(Long courseId) {
+        List<StudentAlertRecord> records = studentAlertRecordMapper.selectList(alertQuery(courseId, null, null));
+        return new StudentAlertSummaryDto(
+                records.size(),
+                countByStatus(records, "PENDING"),
+                countByStatus(records, "PROCESSING"),
+                countByStatus(records, "RESOLVED"),
+                countByStatus(records, "IGNORED"),
+                countByLevel(records, 1),
+                countByLevel(records, 2),
+                countByLevel(records, 3)
+        );
+    }
+
+    public List<StudentAlertRecordDto> listAlerts(Long courseId, Integer alertLevel, String status) {
+        return studentAlertRecordMapper.selectList(alertQuery(courseId, alertLevel, status)
+                        .orderByDesc(StudentAlertRecord::getGeneratedAt)
+                        .last("LIMIT 100"))
+                .stream()
+                .map(this::toDto)
+                .toList();
+    }
+
+    public StudentAlertRecordDto updateAlertStatus(Long id, String status) {
+        StudentAlertRecord record = studentAlertRecordMapper.selectById(id);
+        if (record == null || !SUPPORTED_STATUSES.contains(status)) {
+            return null;
+        }
+        record.setStatus(status);
+        record.setHandledAt(ACTIVE_STATUSES.contains(status) ? null : LocalDateTime.now());
+        studentAlertRecordMapper.updateById(record);
+        return toDto(record);
+    }
+
+    public List<StudentAlertRecordDto> getStudentFeedback(Long studentId, Long courseId) {
+        LambdaQueryWrapper<StudentAlertRecord> wrapper = new LambdaQueryWrapper<StudentAlertRecord>()
+                .eq(StudentAlertRecord::getStudentId, studentId)
+                .in(StudentAlertRecord::getStatus, ACTIVE_STATUSES)
+                .orderByDesc(StudentAlertRecord::getAlertLevel)
+                .orderByDesc(StudentAlertRecord::getGeneratedAt)
+                .last("LIMIT 5");
+        if (courseId != null) {
+            wrapper.eq(StudentAlertRecord::getCourseId, courseId);
+        }
+        return studentAlertRecordMapper.selectList(wrapper).stream()
+                .map(this::toDto)
+                .toList();
+    }
+
     /**
      * 获取预警统计
      */
@@ -162,5 +323,80 @@ public class AlertService {
         stats.put("severe", 0);
 
         return stats;
+    }
+
+    private LambdaQueryWrapper<StudentAlertRecord> alertQuery(Long courseId, Integer alertLevel, String status) {
+        LambdaQueryWrapper<StudentAlertRecord> wrapper = new LambdaQueryWrapper<>();
+        if (courseId != null) {
+            wrapper.eq(StudentAlertRecord::getCourseId, courseId);
+        }
+        if (alertLevel != null) {
+            wrapper.eq(StudentAlertRecord::getAlertLevel, alertLevel);
+        }
+        if (status != null && !status.isBlank()) {
+            wrapper.eq(StudentAlertRecord::getStatus, status);
+        }
+        return wrapper;
+    }
+
+    private boolean hasActiveAlert(Long studentId, Long courseId, String alertType) {
+        return studentAlertRecordMapper.selectCount(new LambdaQueryWrapper<StudentAlertRecord>()
+                .eq(StudentAlertRecord::getStudentId, studentId)
+                .eq(StudentAlertRecord::getCourseId, courseId)
+                .eq(StudentAlertRecord::getAlertType, alertType)
+                .in(StudentAlertRecord::getStatus, ACTIVE_STATUSES)) > 0;
+    }
+
+    private StudentAlertRecord buildRecord(Long studentId, Long courseId, String type, int level, String title, String message, String suggestion, String evidence) {
+        StudentAlertRecord record = new StudentAlertRecord();
+        record.setStudentId(studentId);
+        record.setCourseId(courseId);
+        record.setAlertType(type);
+        record.setAlertLevel(level);
+        record.setTitle(title);
+        record.setMessage(message);
+        record.setSuggestion(suggestion);
+        record.setStatus("PENDING");
+        record.setEvidenceJson(evidence);
+        record.setGeneratedAt(LocalDateTime.now());
+        return record;
+    }
+
+    private StudentAlertRecordDto toDto(StudentAlertRecord record) {
+        return new StudentAlertRecordDto(
+                record.getId(),
+                record.getStudentId(),
+                record.getCourseId(),
+                record.getAlertType(),
+                record.getAlertLevel(),
+                record.getTitle(),
+                record.getMessage(),
+                record.getSuggestion(),
+                record.getStatus(),
+                record.getGeneratedAt(),
+                record.getHandledAt()
+        );
+    }
+
+    private long countByType(List<StudentActivityEvent> events, String eventType) {
+        return events.stream().filter(event -> eventType.equals(event.getEventType())).count();
+    }
+
+    private long countByStatus(List<StudentAlertRecord> records, String status) {
+        return records.stream().filter(record -> status.equals(record.getStatus())).count();
+    }
+
+    private long countByLevel(List<StudentAlertRecord> records, int alertLevel) {
+        return records.stream().filter(record -> record.getAlertLevel() != null && record.getAlertLevel() == alertLevel).count();
+    }
+
+    private String evidenceOf(long eventCount, long studySeconds, long materialOpenCount, long knowledgeViewCount, long aiAskCount) {
+        return String.format(
+                "{\"eventCount\":%d,\"studySeconds\":%d,\"materialOpenCount\":%d,\"knowledgeViewCount\":%d,\"aiAskCount\":%d}",
+                eventCount,
+                studySeconds,
+                materialOpenCount,
+                knowledgeViewCount,
+                aiAskCount);
     }
 }

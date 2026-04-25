@@ -159,12 +159,14 @@ interface KnowledgeGraphProps {
   crawlStatus?: CrawlTaskStatusInfo | null;
   refreshCrawlStatus?: () => Promise<void> | void;
   highlightNodeIds?: number[];
+  onNodeView?: (node: KnowledgeNodeInfo) => void;
 }
 
 export const KnowledgeGraph: React.FC<KnowledgeGraphProps> = ({
   crawlStatus,
   refreshCrawlStatus,
   highlightNodeIds = [],
+  onNodeView,
 }) => {
   const { roleUi } = useAuth();
   const [nodes, setNodes] = useState<KnowledgeNodeInfo[]>([]);
@@ -183,6 +185,9 @@ export const KnowledgeGraph: React.FC<KnowledgeGraphProps> = ({
   const [showCreateNode, setShowCreateNode] = useState(false);
   const [createNodeForm] = Form.useForm<KnowledgeNodeCreateRequest>();
   const [addingRelation, setAddingRelation] = useState(false);
+  const [editingRelationId, setEditingRelationId] = useState<number | null>(null);
+  const [deletingRelationId, setDeletingRelationId] = useState<number | null>(null);
+  const [undoingRelationChange, setUndoingRelationChange] = useState(false);
   const [creatingNode, setCreatingNode] = useState(false);
   const [actionPending, setActionPending] = useState(false);
   const [excelImporting, setExcelImporting] = useState(false);
@@ -383,6 +388,12 @@ export const KnowledgeGraph: React.FC<KnowledgeGraphProps> = ({
     return node ? { x: node.positionX, y: node.positionY } : null;
   };
 
+  const findNodeName = (nodeId: number) => nodes.find(node => node.id === nodeId)?.name || `Node #${nodeId}`;
+
+  const selectedRelations = selectedNode
+    ? connections.filter(connection => connection.fromNodeId === selectedNode.id || connection.toNodeId === selectedNode.id)
+    : [];
+
   const handleAddRelation = async () => {
     if (!selectedNode || addingRelation) {
       return;
@@ -400,8 +411,57 @@ export const KnowledgeGraph: React.FC<KnowledgeGraphProps> = ({
       setShowAddRelation(false);
       relationForm.resetFields();
       message.success('Relation added successfully.');
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : 'Failed to add relation.');
     } finally {
       setAddingRelation(false);
+    }
+  };
+
+  const handleUpdateRelation = async (connection: KnowledgeRelationInfo, relationType: string) => {
+    setEditingRelationId(connection.id);
+    try {
+      const updated = await knowledgeApi.updateRelation(connection.id, {
+        relationType,
+        description: connection.description,
+        weight: connection.weight,
+      });
+      setConnections(previous => previous.map(item => item.id === updated.id ? updated : item));
+      message.success('Relation updated successfully.');
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : 'Failed to update relation.');
+    } finally {
+      setEditingRelationId(null);
+    }
+  };
+
+  const handleDeleteRelation = async (connection: KnowledgeRelationInfo) => {
+    setDeletingRelationId(connection.id);
+    try {
+      await knowledgeApi.deleteRelation(connection.id);
+      setConnections(previous => previous.filter(item => item.id !== connection.id));
+      message.success('Relation deleted successfully.');
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : 'Failed to delete relation.');
+    } finally {
+      setDeletingRelationId(null);
+    }
+  };
+
+  const handleUndoLatestRelationChange = async () => {
+    if (undoingRelationChange) {
+      return;
+    }
+
+    setUndoingRelationChange(true);
+    try {
+      await knowledgeApi.undoLatestRelationChange();
+      await loadGraph();
+      message.success('Latest relation change undone.');
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : 'Failed to undo relation change.');
+    } finally {
+      setUndoingRelationChange(false);
     }
   };
 
@@ -537,6 +597,12 @@ export const KnowledgeGraph: React.FC<KnowledgeGraphProps> = ({
           <input ref={excelInputRef} type="file" accept=".xlsx,.xls" onChange={handleExcelImport} style={{ display: 'none' }} />
         </Space.Compact>
 
+        {canEditKnowledgeGraph && (
+          <Button loading={undoingRelationChange} onClick={() => void handleUndoLatestRelationChange()}>
+            Undo Relation Change
+          </Button>
+        )}
+
         <div style={{ display: 'flex', gap: 12, background: '#fff', padding: '6px 12px', borderRadius: 8, border: '1px solid #d9d9d9', boxShadow: '0 2px 8px rgba(0,0,0,0.05)' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <div style={{ width: 12, height: 12, borderRadius: 2, background: NODE_TYPE_COLORS.TECH.border }} />
@@ -613,6 +679,7 @@ export const KnowledgeGraph: React.FC<KnowledgeGraphProps> = ({
                 onClick={event => {
                   event.stopPropagation();
                   setSelectedNode(node);
+                  onNodeView?.(node);
                 }}
                 onMouseDown={event => handleNodeMouseDown(event, node.id)}
                 style={{ cursor: 'pointer' }}
@@ -744,41 +811,66 @@ export const KnowledgeGraph: React.FC<KnowledgeGraphProps> = ({
             )}
 
             <div>
-              <Text type="secondary" style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', marginBottom: 8, display: 'block' }}>Linked Nodes</Text>
+              <Text type="secondary" style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', marginBottom: 8, display: 'block' }}>Relations</Text>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {connections
-                  .filter(connection => connection.fromNodeId === selectedNode.id || connection.toNodeId === selectedNode.id)
-                  .map(connection => {
-                    const linkedId = connection.fromNodeId === selectedNode.id ? connection.toNodeId : connection.fromNodeId;
-                    const linkedNode = nodes.find(node => node.id === linkedId);
-                    if (!linkedNode) {
-                      return null;
-                    }
-                    return (
-                      <div
-                        key={connection.id}
-                        onClick={() => setSelectedNode(linkedNode)}
-                        style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: 8,
-                          padding: '8px 12px',
-                          border: '1px solid #f0f0f0',
-                          borderRadius: 8,
-                          cursor: 'pointer',
-                          background: '#fafafa',
-                          transition: 'all 0.2s',
-                        }}
-                      >
+                {selectedRelations.map(connection => {
+                  const linkedId = connection.fromNodeId === selectedNode.id ? connection.toNodeId : connection.fromNodeId;
+                  const linkedNode = nodes.find(node => node.id === linkedId);
+                  if (!linkedNode) {
+                    return null;
+                  }
+                  const isSynthetic = connection.id < 0;
+                  const direction = connection.fromNodeId === selectedNode.id ? 'Outgoing' : 'Incoming';
+                  return (
+                    <div
+                      key={connection.id}
+                      style={{
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: 8,
+                        padding: '10px 12px',
+                        border: '1px solid #f0f0f0',
+                        borderRadius: 8,
+                        background: '#fafafa',
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                         <div style={{ width: 10, height: 10, borderRadius: '50%', background: getNodeColor(linkedNode.nodeType).border }} />
-                        <Text style={{ fontSize: 14, flex: 1 }} ellipsis>{linkedNode.name}</Text>
-                        <Tag color="default" style={{ margin: 0, border: 'none', background: `${getRelationColor(connection.relationType)}20`, color: getRelationColor(connection.relationType) }}>
+                        <Text style={{ fontSize: 14, flex: 1, cursor: 'pointer' }} ellipsis onClick={() => setSelectedNode(linkedNode)}>
+                          {findNodeName(linkedId)}
+                        </Text>
+                        <Tag style={{ margin: 0 }}>{direction}</Tag>
+                        {isSynthetic && <Tag color="blue" style={{ margin: 0 }}>Readonly</Tag>}
+                      </div>
+                      {canEditKnowledgeGraph && !isSynthetic ? (
+                        <Space.Compact style={{ width: '100%' }}>
+                          <Select
+                            value={connection.relationType}
+                            options={RELATION_TYPES.map(type => ({ label: type, value: type }))}
+                            loading={editingRelationId === connection.id}
+                            onChange={value => void handleUpdateRelation(connection, value)}
+                            style={{ flex: 1 }}
+                          />
+                          <Popconfirm
+                            title="Delete this relation?"
+                            okText="Delete"
+                            cancelText="Cancel"
+                            okButtonProps={{ danger: true, loading: deletingRelationId === connection.id }}
+                            onConfirm={() => void handleDeleteRelation(connection)}
+                          >
+                            <Button danger icon={<DeleteOutlined />} loading={deletingRelationId === connection.id} />
+                          </Popconfirm>
+                        </Space.Compact>
+                      ) : (
+                        <Tag color="default" style={{ alignSelf: 'flex-start', margin: 0, border: 'none', background: `${getRelationColor(connection.relationType)}20`, color: getRelationColor(connection.relationType) }}>
                           {connection.relationType}
                         </Tag>
-                      </div>
-                    );
-                  })}
-                {connections.filter(connection => connection.fromNodeId === selectedNode.id || connection.toNodeId === selectedNode.id).length === 0 && (
+                      )}
+                      {connection.description && <Text type="secondary" style={{ fontSize: 12 }}>{connection.description}</Text>}
+                    </div>
+                  );
+                })}
+                {selectedRelations.length === 0 && (
                   <Text type="secondary" style={{ fontSize: 13 }}>No linked nodes</Text>
                 )}
               </div>
@@ -787,7 +879,7 @@ export const KnowledgeGraph: React.FC<KnowledgeGraphProps> = ({
             <Divider style={{ margin: '8px 0' }} />
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              {!showAddRelation ? (
+              {canEditKnowledgeGraph && (!showAddRelation ? (
                 <Button type="dashed" block icon={<LinkOutlined />} onClick={() => setShowAddRelation(true)}>
                   Add Relation
                 </Button>
@@ -821,7 +913,7 @@ export const KnowledgeGraph: React.FC<KnowledgeGraphProps> = ({
                     <Button type="primary" htmlType="submit" loading={addingRelation}>Confirm</Button>
                   </Space>
                 </Form>
-              )}
+              ))}
 
               {canEditKnowledgeGraph && selectedNode.nodeType === 'TECH' && (
                 <Popconfirm

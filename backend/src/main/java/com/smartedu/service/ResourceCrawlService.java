@@ -71,6 +71,7 @@ public class ResourceCrawlService {
     private final AiIntelligenceService aiIntelligenceService;
     private final KnowledgeIngestionService knowledgeIngestionService;
     private final ObjectMapper objectMapper;
+    private final CrawlSourceService crawlSourceService;
 
     private final Object taskLock = new Object();
     private final ExecutorService crawlExecutor = Executors.newSingleThreadExecutor(r -> {
@@ -90,6 +91,10 @@ public class ResourceCrawlService {
     private volatile String statusMessage = "idle";
 
     public CrawlTaskStatus startManualCrawl() {
+        return startManualCrawl(null);
+    }
+
+    public CrawlTaskStatus startManualCrawl(Long sourceId) {
         synchronized (taskLock) {
             if (isTaskActive(taskState)) {
                 statusMessage = "task already running";
@@ -105,7 +110,7 @@ public class ResourceCrawlService {
             currentResult = initCrawlResult(startedAt);
             statusMessage = "task started";
 
-            crawlExecutor.submit(this::runManualCrawl);
+            crawlExecutor.submit(() -> runManualCrawl(sourceId));
             return snapshotStatus();
         }
     }
@@ -130,7 +135,7 @@ public class ResourceCrawlService {
         return snapshotStatus();
     }
 
-    private void runManualCrawl() {
+    private void runManualCrawl(Long sourceId) {
         long startedMs = System.currentTimeMillis();
         CrawlResult result = initCrawlResult(startedAt != null ? startedAt : LocalDateTime.now());
 
@@ -138,7 +143,30 @@ public class ResourceCrawlService {
             List<CrawlResult.SiteStat> siteStats = new ArrayList<>();
             Set<String> seenArticleFingerprints = new LinkedHashSet<>();
 
-            for (CrawlSiteRule rule : crawlSiteRules) {
+            List<CrawlSiteRule> enabledRules = crawlSourceService.filterEnabledRules(crawlSiteRules, sourceId);
+            if (enabledRules.isEmpty()) {
+                result.setSiteStats(siteStats);
+                result.setFinishedAt(LocalDateTime.now());
+                result.setDurationMs(System.currentTimeMillis() - startedMs);
+
+                synchronized (taskLock) {
+                    finishedAt = result.getFinishedAt();
+                    currentSite = "";
+                    currentUrl = "";
+                    currentResult = copyCrawlResult(result);
+                    lastResult = copyCrawlResult(result);
+                    taskState = CrawlTaskState.FAILED;
+                    statusMessage = "task failed: no enabled crawler rule matched";
+                }
+                crawlSourceService.recordEmptyRun(
+                        sourceId,
+                        result.getStartedAt(),
+                        result.getFinishedAt(),
+                        "FAILED",
+                        "No enabled crawler rule matched the selected source");
+                return;
+            }
+            for (CrawlSiteRule rule : enabledRules) {
                 if (shouldStopBeforeNextItem()) {
                     break;
                 }
@@ -172,6 +200,7 @@ public class ResourceCrawlService {
                     statusMessage = "task completed";
                 }
             }
+            crawlSourceService.recordRun(result, stopRequested ? "STOPPED" : "DONE", "");
         } catch (Exception e) {
             log.error("crawl task failed", e);
 
@@ -187,6 +216,7 @@ public class ResourceCrawlService {
                 taskState = CrawlTaskState.FAILED;
                 statusMessage = "task failed: " + e.getMessage();
             }
+            crawlSourceService.recordRun(result, "FAILED", e.getMessage());
         } finally {
             synchronized (taskLock) {
                 stopRequested = false;
@@ -297,6 +327,7 @@ public class ResourceCrawlService {
         resource.setIdeologySummary(processed.getIdeologySummary());
         resource.setTags(processed.getTagsJson());
         resource.setSyncStatus("SYNCED");
+        resource.setReviewStatus("PENDING");
         return resource;
     }
 

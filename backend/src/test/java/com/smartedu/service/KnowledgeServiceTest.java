@@ -32,6 +32,7 @@ class KnowledgeServiceTest {
                 null,
                 buildSubjectIdeologyMatchMapper(recorder),
                 buildKnowledgeRelationMapper(recorder),
+                null,
                 chunkService,
                 buildCourseSubjectKnowledgeMapper(recorder),
                 buildSubjectKnowledgeSourceMapper(recorder),
@@ -62,6 +63,7 @@ class KnowledgeServiceTest {
                 null,
                 buildSubjectIdeologyMatchMapper(recorder),
                 buildKnowledgeRelationMapper(recorder),
+                null,
                 chunkService,
                 buildCourseSubjectKnowledgeMapper(recorder),
                 buildSubjectKnowledgeSourceMapper(recorder),
@@ -108,6 +110,7 @@ class KnowledgeServiceTest {
                 buildIdeologyKnowledgeMapper(List.of(existingIdeology)),
                 buildSubjectIdeologyMatchMapper(new DeleteRecorder()),
                 buildKnowledgeRelationMapper(new DeleteRecorder()),
+                null,
                 chunkService,
                 buildCourseSubjectKnowledgeMapper(new DeleteRecorder()),
                 buildSubjectKnowledgeSourceMapper(new DeleteRecorder()),
@@ -197,6 +200,9 @@ class KnowledgeServiceTest {
                     if ("delete".equals(method.getName())) {
                         recorder.relationDeleteCalls++;
                         return 1;
+                    }
+                    if ("selectList".equals(method.getName())) {
+                        return List.of();
                     }
                     return defaultValue(method.getReturnType());
                 }

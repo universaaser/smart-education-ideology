@@ -175,7 +175,7 @@ public class UploadController {
 
         // 如果已完成，返回解析结果
         if ("COMPLETED".equals(task.getStatus())) {
-            result.put("parsedContent", task.getParsedContent());
+            result.put("parsedContent", extractParsedContentForView(task.getParsedContent()));
             result.put("aiAnalysis", task.getAiAnalysis());
             result.put("completedAt", task.getCompletedAt());
         }
@@ -238,8 +238,15 @@ public class UploadController {
         if (task == null) {
             return Result.notFound("Task not found");
         }
-        TeachingMaterialDraftDto draft = teachingMaterialService.saveDraft(taskId, request);
-        return Result.success("Draft saved", draft);
+        try {
+            TeachingMaterialDraftDto draft = teachingMaterialService.saveDraft(taskId, request);
+            return Result.success("Draft saved", draft);
+        } catch (IllegalArgumentException ex) {
+            return Result.badRequest(ex.getMessage());
+        } catch (RuntimeException ex) {
+            log.error("Failed to save teaching material draft, taskId={}", taskId, ex);
+            return Result.error("Failed to save teaching material draft");
+        }
     }
 
     /**
@@ -327,8 +334,15 @@ public class UploadController {
         if (task == null) {
             return Result.notFound("Task not found");
         }
-        TeachingMaterialViewDto saved = teachingMaterialService.savePublishedVersion(taskId, request);
-        return Result.success("Material version saved", saved);
+        try {
+            TeachingMaterialViewDto saved = teachingMaterialService.savePublishedVersion(taskId, request);
+            return Result.success("Material version saved", saved);
+        } catch (IllegalArgumentException ex) {
+            return Result.badRequest(ex.getMessage());
+        } catch (RuntimeException ex) {
+            log.error("Failed to save teaching material version, taskId={}", taskId, ex);
+            return Result.error("Failed to save teaching material version");
+        }
     }
 
     /**
@@ -454,6 +468,26 @@ public class UploadController {
             return filename.substring(dotIndex + 1);
         }
         return "";
+    }
+
+    private String extractParsedContentForView(String parsedContent) {
+        if (parsedContent == null || parsedContent.isBlank()) {
+            return parsedContent;
+        }
+        try {
+            JsonNode root = objectMapper.readTree(parsedContent);
+            JsonNode rawMarkdown = root.path("rawMarkdown");
+            if (rawMarkdown.isTextual()) {
+                return rawMarkdown.asText();
+            }
+            JsonNode overview = root.path("overview");
+            if (overview.isTextual()) {
+                return overview.asText();
+            }
+        } catch (Exception ex) {
+            return parsedContent;
+        }
+        return parsedContent;
     }
 
     private Map<String, Object> buildTaskSummary(ParseTask task) {

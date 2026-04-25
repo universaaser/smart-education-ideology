@@ -84,6 +84,12 @@ public class Resource {
      */
     private String syncStatus;
 
+    private String reviewStatus;
+
+    private Long reviewedBy;
+
+    private LocalDateTime reviewedAt;
+
     /**
      * 关联的解析任务ID
      */

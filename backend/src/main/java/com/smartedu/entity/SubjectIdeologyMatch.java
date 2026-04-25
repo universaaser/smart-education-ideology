@@ -37,6 +37,16 @@ public class SubjectIdeologyMatch {
 
     private String matchReason;
 
+    private String reviewStatus;
+
+    private Integer version;
+
+    private Long reviewerId;
+
+    private LocalDateTime reviewedAt;
+
+    private String reviewComment;
+
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createdAt;
 }

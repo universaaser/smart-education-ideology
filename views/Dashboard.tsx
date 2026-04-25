@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { View } from '../types';
-import { dashboardApi, CourseInfo, ActivityInfo, TrendItem } from '../services/api';
+import { View, ViewChangeHandler } from '../types';
+import { dashboardApi, CourseInfo, ActivityInfo, TrendItem, DashboardOverviewInfo } from '../services/api';
 import {
   Card, Statistic, Row, Col, Typography, Button, List, Avatar,
   Table, Tag, Space, Progress, Spin, Empty
@@ -8,13 +8,13 @@ import {
 import {
   RobotOutlined, CloudUploadOutlined, WarningOutlined,
   ShareAltOutlined, InfoCircleOutlined, RiseOutlined,
-  ExportOutlined, EditOutlined
+  ExportOutlined, EditOutlined, FileSearchOutlined, CheckCircleOutlined
 } from '@ant-design/icons';
 
 const { Title, Text } = Typography;
 
 interface DashboardProps {
-  onChangeView: (view: View) => void;
+  onChangeView: ViewChangeHandler;
 }
 
 export const Dashboard: React.FC<DashboardProps> = ({ onChangeView }) => {
@@ -22,21 +22,24 @@ export const Dashboard: React.FC<DashboardProps> = ({ onChangeView }) => {
   const [courses, setCourses] = useState<CourseInfo[]>([]);
   const [activities, setActivities] = useState<ActivityInfo[]>([]);
   const [trendData, setTrendData] = useState<TrendItem[]>([]);
+  const [overview, setOverview] = useState<DashboardOverviewInfo | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const loadData = async () => {
       try {
-        const [statsData, coursesData, activitiesData, trendResult] = await Promise.all([
+        const [statsData, coursesData, activitiesData, trendResult, overviewData] = await Promise.all([
           dashboardApi.getStats(),
           dashboardApi.getCourses(),
           dashboardApi.getActivities(4),
           dashboardApi.getTrend(),
+          dashboardApi.getOverview(),
         ]);
         setStats(statsData || {});
         setCourses(coursesData || []);
         setActivities(activitiesData || []);
         setTrendData(trendResult || []);
+        setOverview(overviewData || null);
       } catch {
         // Keep the page renderable when the backend is unavailable.
       } finally {
@@ -98,10 +101,36 @@ export const Dashboard: React.FC<DashboardProps> = ({ onChangeView }) => {
     const mapping: Record<string, string> = {
       orange: 'warning',
       emerald: 'success',
+      green: 'success',
       blue: 'processing',
       red: 'error',
     };
     return mapping[color] || 'default';
+  };
+
+  const mapView = (view: string): View | null => {
+    return Object.values(View).includes(view as View) ? view as View : null;
+  };
+
+  const mapTodoColor = (status: string) => {
+    const mapping: Record<string, string> = {
+      warning: '#f59e0b',
+      processing: 'var(--color-primary)',
+      purple: '#8b5cf6',
+      error: 'var(--color-error)',
+    };
+    return mapping[status] || 'var(--color-text-secondary)';
+  };
+
+  const mapTaskStatus = (status: string) => {
+    const mapping: Record<string, string> = {
+      COMPLETED: 'success',
+      FAILED: 'error',
+      PARSING: 'processing',
+      ANALYZING: 'processing',
+      PENDING: 'default',
+    };
+    return mapping[status] || 'default';
   };
 
   const toStatisticValue = (value: unknown, fallback: string | number = '--'): string | number => {
@@ -147,8 +176,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ onChangeView }) => {
       title: 'Action',
       key: 'action',
       align: 'right' as const,
-      render: () => (
-        <Button type="text" icon={<EditOutlined />} style={{ color: 'var(--color-primary)' }} />
+      render: (_: unknown, record: CourseInfo) => (
+        <Button
+          type="text"
+          icon={<EditOutlined />}
+          style={{ color: 'var(--color-primary)' }}
+          onClick={() => onChangeView(View.COURSE_MANAGEMENT, { courseId: record.id })}
+        />
       ),
     },
   ];
@@ -214,7 +248,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onChangeView }) => {
             <Card
               bordered={false}
               hoverable
-              onClick={() => onChangeView(View.KNOWLEDGE_GRAPH)}
+              onClick={() => onChangeView(View.ALERTS)}
               style={{ cursor: 'pointer', border: '1px solid transparent' }}
             >
               <Statistic
@@ -226,12 +260,39 @@ export const Dashboard: React.FC<DashboardProps> = ({ onChangeView }) => {
               <div style={{ marginTop: 8, fontSize: 13, display: 'flex', justifyContent: 'space-between' }}>
                 <div>
                   <Text type="warning">Attention needed</Text>
-                  <Text type="secondary" style={{ marginLeft: 4 }}>Course content review</Text>
+                  <Text type="secondary" style={{ marginLeft: 4 }}>Student alert review</Text>
                 </div>
                 <ExportOutlined style={{ color: 'var(--color-text-tertiary)' }} />
               </div>
             </Card>
           </Col>
+        </Row>
+
+        <Row gutter={[24, 24]}>
+          {(overview?.todoCards || []).map(card => {
+            const target = mapView(card.view);
+            return (
+              <Col xs={24} sm={12} lg={6} key={card.key}>
+                <Card
+                  bordered={false}
+                  hoverable={Boolean(target)}
+                  onClick={() => target && onChangeView(target)}
+                  style={{ cursor: target ? 'pointer' : 'default', height: '100%' }}
+                >
+                  <Statistic
+                    title={card.title}
+                    value={card.count}
+                    valueStyle={{ color: 'var(--color-text-primary)', fontWeight: 'bold' }}
+                    prefix={<WarningOutlined style={{ color: mapTodoColor(card.status), marginRight: 8 }} />}
+                  />
+                  <div style={{ marginTop: 8, fontSize: 13, display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+                    <Text type="secondary">{card.description}</Text>
+                    {target && <ExportOutlined style={{ color: 'var(--color-text-tertiary)', flex: '0 0 auto' }} />}
+                  </div>
+                </Card>
+              </Col>
+            );
+          })}
         </Row>
 
         <Row gutter={[24, 24]}>
@@ -326,6 +387,56 @@ export const Dashboard: React.FC<DashboardProps> = ({ onChangeView }) => {
                 />
               ) : (
                 <Empty description="No activity yet" style={{ marginTop: 80 }} />
+              )}
+            </Card>
+          </Col>
+        </Row>
+
+        <Row gutter={[24, 24]}>
+          <Col xs={24} lg={10}>
+            <Card title="Material Publishing" bordered={false} style={{ height: '100%' }}>
+              <Row gutter={16}>
+                <Col span={8}>
+                  <Statistic title="Drafts" value={overview?.materialSummary?.draftCount || 0} prefix={<EditOutlined />} />
+                </Col>
+                <Col span={8}>
+                  <Statistic title="Published" value={overview?.materialSummary?.publishedCount || 0} prefix={<CheckCircleOutlined />} />
+                </Col>
+                <Col span={8}>
+                  <Statistic title="Latest" value={overview?.materialSummary?.latestCount || 0} prefix={<FileSearchOutlined />} />
+                </Col>
+              </Row>
+              <Button style={{ marginTop: 24 }} onClick={() => onChangeView(View.COURSE_LIBRARY)}>
+                Open Course Library
+              </Button>
+            </Card>
+          </Col>
+          <Col xs={24} lg={14}>
+            <Card title="Recent Parse Tasks" bordered={false} bodyStyle={{ padding: '0 24px', height: 220, overflowY: 'auto' }}>
+              {overview?.recentParseTasks?.length ? (
+                <List
+                  dataSource={overview.recentParseTasks}
+                  renderItem={task => (
+                    <List.Item
+                      actions={[
+                        <Button key="open" type="link" onClick={() => onChangeView(View.RESOURCE_UPLOAD, { resourceUploadTarget: { taskId: task.id } })}>
+                          Open
+                        </Button>,
+                      ]}
+                    >
+                      <List.Item.Meta
+                        avatar={<Avatar icon={<CloudUploadOutlined />} style={{ backgroundColor: 'var(--color-primary-soft)', color: 'var(--color-primary)' }} />}
+                        title={<Space><Text strong>{task.fileName}</Text><Tag color={mapTaskStatus(task.status)}>{task.status}</Tag></Space>}
+                        description={<Space direction="vertical" size={2} style={{ width: '100%' }}>
+                          <Progress percent={task.progress} size="small" />
+                          <Text type="secondary" style={{ fontSize: 11 }}>{task.updatedAt}</Text>
+                        </Space>}
+                      />
+                    </List.Item>
+                  )}
+                />
+              ) : (
+                <Empty description="No parse tasks" style={{ marginTop: 40 }} />
               )}
             </Card>
           </Col>

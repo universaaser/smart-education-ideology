@@ -72,4 +72,10 @@ public class DashboardController {
         List<Map<String, Object>> trendData = dashboardService.getTrendData();
         return Result.success(trendData);
     }
+
+    @GetMapping("/overview")
+    public Result<Map<String, Object>> getOverview(
+            @RequestParam(required = false) Long teacherId) {
+        return Result.success(dashboardService.getOverview(teacherId));
+    }
 }

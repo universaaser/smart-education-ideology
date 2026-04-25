@@ -40,7 +40,7 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class ChatService {
 
-    private static final String SYSTEM_PROMPT = "You are the AI teaching assistant of the Smart Education Ideology platform. Help teachers design curriculum ideology teaching plans with concise, practical, and trustworthy answers.";
+    private static final String SYSTEM_PROMPT = "You are the AI teaching assistant of the Smart Education Ideology platform. Help teachers design curriculum ideology teaching plans with concise, practical, and trustworthy answers. Answer in plain text only. Do not use Markdown headings, bold markers, tables, code fences, or Markdown bullet syntax.";
 
     private final ChatSessionMapper chatSessionMapper;
     private final ChatMessageMapper chatMessageMapper;
@@ -131,8 +131,9 @@ public class ChatService {
         session.setMessageCount((session.getMessageCount() == null ? 0 : session.getMessageCount()) + 2);
         session.setLastMessageAt(LocalDateTime.now());
         if (session.getMessageCount() == 2) {
-            String title = userMessage.length() > 20 ? userMessage.substring(0, 20) + "..." : userMessage;
+            String title = generateSessionTitle(userMessage, aiResponse, providerKey);
             session.setTitle(title);
+            session.setSummary(truncate(cleanPlainText(userMessage), 200));
         }
         chatSessionMapper.updateById(session);
 
@@ -140,6 +141,35 @@ public class ChatService {
                 aiMsg,
                 retrievalResult.getContexts().stream().map(this::toChatCitation).collect(Collectors.toList()),
                 retrievalResult.getRetrievalStatus());
+    }
+
+    private String generateSessionTitle(String userMessage, String aiResponse, String providerKey) {
+        String fallback = truncate(cleanPlainText(userMessage), 24);
+        if (fallback.isBlank()) {
+            fallback = "New Chat";
+        }
+        try {
+            List<Map<String, String>> titleMessages = List.of(Map.of(
+                    "role", "user",
+                    "content", "User message: " + truncate(cleanPlainText(userMessage), 300)
+                            + "\nAssistant answer: " + truncate(cleanPlainText(aiResponse), 300)
+                            + "\nCreate one short conversation title."));
+            String title = aiIntelligenceService.chat(titleMessages,
+                    "Create a short plain-text title for this conversation. No Markdown, no quotes, no punctuation decoration. Use 8 to 16 Chinese characters or 3 to 8 English words.",
+                    providerKey);
+            String cleaned = truncate(cleanPlainText(title), 60);
+            return cleaned.isBlank() ? fallback : cleaned;
+        } catch (RuntimeException ex) {
+            return fallback;
+        }
+    }
+
+    private String cleanPlainText(String value) {
+        return safe(value)
+                .replaceAll("[`*_#>|\\[\\]()]", "")
+                .replaceAll("(?m)^\\s*[-+•]\\s+", "")
+                .replaceAll("\\s+", " ")
+                .trim();
     }
 
     private KnowledgeRetrievalResult retrieveChatContext(String userMessage, int limit) {

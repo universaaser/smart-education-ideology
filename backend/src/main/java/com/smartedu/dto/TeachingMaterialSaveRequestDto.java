@@ -15,6 +15,8 @@ import java.util.List;
 @AllArgsConstructor
 public class TeachingMaterialSaveRequestDto {
 
+    private Long chapterId;
+
     private String title;
 
     private String lectureNotes;

@@ -8,35 +8,35 @@
 ## 一、基础平台与角色体系
 - [x] 用户登录、注册、JWT 鉴权基础流程。
 - [x] 教师、学生、管理员角色字段和基础角色分流。
-- [~] 基于角色的菜单与视图权限控制。仍需补接口级权限验证和越权测试。
-- [ ] 管理员用户管理、课程归属管理、学生-课程绑定关系。
+- [~] 基于角色的菜单与视图权限控制。已为教师/管理员新增 Source Management、Keyword Tasks、Match Review、Model Settings 与 Admin Console 入口和角色能力位；仍需补接口级权限验证和越权测试。
+- [~] 管理员用户管理、课程归属管理、学生-课程绑定关系。已新增 Admin Console、用户分页/创建/编辑/启停、课程学生绑定表与绑定/移除页面；2026-04-25 已新增教师 Dashboard 隐藏课程管理页入口、课程详情/更新接口和课程命名空间学生绑定/移除接口。班级组织、接口级 admin/teacher 权限验证与更细课程归属约束仍未完成。
 - [~] 头像上传和用户基础资料。仍需补文件安全校验、默认头像策略和失败提示。
 
 ## 二、思政知识库与来源追溯
 - [x] 资源表、知识点表、来源追溯表等基础数据结构。
 - [~] 从思政类网站爬取文章并入库。已补跨站标题与正文指纹去重、摘要回退摘录；站点规则、调度和审计仍主要是 demo 级能力。
 - [~] 每条知识点附带来源链接。跨站重复文章已在抓取阶段拦截；仍需补来源可信度、摘录位置、去重审计。
-- [ ] 定期自动更新知识库，包括定时任务、失败重试、更新日志、人工审核。
-- [ ] 资讯源配置管理，支持扩展人民网、学习强国、新华网、GDELT、arXiv 等来源，但不锁死具体来源实现。
+- [~] 定期自动更新知识库，包括定时任务、失败重试、更新日志、人工审核。已新增抓取运行日志和资源人工审核闭环；定时任务与失败重试仍未完成。
+- [~] 资讯源配置管理，支持扩展人民网、学习强国、新华网、GDELT、arXiv 等来源，但不锁死具体来源实现。已新增 `crawl_sources`、来源新增/编辑/启停和 Source Management 页面；站点规则仍复用后端硬编码，GDELT/arXiv 等扩展未接入。
 
 ## 三、专业知识与思政价值挖掘
 - [~] 调用大模型提取专业知识摘要和思政标签。已修正爬虫提示词、解析与空标签回退链路，默认不再写入固定思政标签；仍需补真实 provider 联调、质量评估和人工复核。
 - [~] 支持 DeepSeek/OpenAI 兼容模型配置。Gemini/Doubao/视觉模型仍未正式接入。
-- [ ] 物联网专业术语、课程章节、思政元素之间的可审核匹配机制。
-- [ ] AI 结果人工确认、修改、重新生成和版本留痕。
-- [ ] 面向不同课程的关键词采集与分析任务，而不是固定演示数据。
+- [~] 物联网专业术语、课程章节、思政元素之间的可审核匹配机制。已新增匹配审核字段、审核历史表、列表/批准/拒绝/修改接口和教师端 Match Review 页面；仍需真实浏览器验收、接口级权限验证和更完整的材料生成 trace 证明。
+- [~] AI 结果人工确认、修改、重新生成和版本留痕。已支持专业知识-思政匹配的人工批准、拒绝、修改理由和历史留痕；重新生成与一键回滚仍未完成。
+- [~] 面向不同课程的关键词采集与分析任务，而不是固定演示数据。已新增课程关键词任务表、创建/运行/详情/接受接口和教师端 Keyword Tasks 页面，任务基于课程与关键词从已审核资源中检索并生成 AI 摘要；外部资讯 API、真实浏览器验收和更强去重/审核策略仍未完成。
 
 ## 四、课程知识图谱
 - [x] 知识图谱节点、关系查询和前端可视化展示。
 - [x] 节点位置拖动与保存。
 - [x] Excel 模板下载与批量导入基础能力。
-- [~] 节点关系创建、删除与基础展示体验。已补图谱节点详情抽屉删除按钮、前端删除调用、删除后刷新、删除前依赖解绑清理；新增节点入口已支持可选尺寸、默认避让布局，图谱连线文案已移除并展示完整节点标题；仍需补关系类型校验、重复关系提示、关系删除与节点编辑体验。
+- [~] 节点关系创建、删除与基础展示体验。已补图谱节点详情关系列表、入边/出边展示、关系类型选择与编辑、重复关系提示、单条关系删除和最近一次关系变更撤销；新增节点入口已支持可选尺寸、默认避让布局，图谱连线文案已移除并展示完整节点标题；2026-04-25 已让资源/新闻自动入图节点复用避让布局，并将自动匹配思政关系设为 `APPROVED` 以便生成即连线。仍需节点字段编辑增强、真实浏览器手动验收和更完整冲突处理。
 - [~] 基于图谱的学习路径推荐。当前主要依赖图关系和简单优先级，未结合真实学习画像。
-- [ ] 图谱增量更新、导入历史、冲突处理、回滚或撤销机制。
+- [~] 图谱增量更新、导入历史、冲突处理、回滚或撤销机制。已新增 `knowledge_change_logs` 记录关系编辑/删除 before/after，并支持最近一次关系变更撤销；导入历史、节点级回滚和多人冲突处理仍未完成。
 
 ## 五、文档上传与结构化解析
 - [x] 上传 PDF、Word、PPT、Excel 等文件的前端入口和任务轮询。
-- [~] 后端解析任务状态流转和 AI 分析结果展示。已补“解析→提取→匹配→生成”结构化流水线、重生成接口、实时 live-log、解析历史列表、长文档 `LONGTEXT/JSON` 落库修复，并接通教师编辑保存链路、Markdown 展示/导出与解析结果人工校正闭环；按用户 2026-04-23 最新要求，DOCX 导出不再列为当前验收项，仍需真实 MinerU 或等价解析服务。
+- [~] 后端解析任务状态流转和 AI 分析结果展示。已补“解析→提取→匹配→生成”结构化流水线、重生成接口、实时 live-log、解析历史列表、长文档 `LONGTEXT/JSON` 落库修复，并接通教师编辑保存链路、Markdown 展示/导出与解析结果人工校正闭环；2026-04-25 已修复 JSON 列升级后 Markdown/纯文本直接写入 `parse_tasks.parsed_content` 导致上传失败的问题，并按用户反馈从上传完成页移除对用户无价值的 `AI Analysis` 展示；同日按用户要求，上传解析结果不再同步写入知识图谱，仅保留 parse task、projection 和 vector index。按用户 2026-04-23 最新要求，DOCX 导出不再列为当前验收项，仍需真实 MinerU 或等价解析服务。
 - [~] 文档内容读取与结构化分析。当前已接 `DocumentTextExtractor`，可对 PDF 使用 PDFBox、对 Office 文档使用 POI 提取真实文本，并保留配置化 LLM + 固定 JSON 约束；同时后端已具备 MinerU v4 本地文件上传、轮询、zip 解包、Markdown/大纲/表格/图片/公式结构化读取与静态资源映射能力，并修正上传任务入库时优先复用 `aiAnalysis.documentStructure`、避免 MinerU Markdown `parsedContent` 破坏知识入库；但真实外部联调、复杂文档质量与前端来源可见性仍未完全验收。
 - [~] 真实 MinerU 或等价解析服务接入，返回章节、段落、表格、图片、知识点等结构化结果。后端主链路、结构 DTO、前端结构化展示组件与 Parse History 来源标签已接通，但仍需真实服务联调与复杂文档人工验收。
 - [x] 解析结果人工校正、保存、重新解析、失败重试。已新增 `parse_task_corrections` 最新校正稿、结构化校正 UI、有效结果投影同步、完成态重跑解析和失败态重试。
@@ -54,55 +54,55 @@
 - [~] 生成贴合物联网专业的案例内容。已支持案例列表可编辑与保存，课程级发布规则可要求案例包含思政标签；仍需规则配置入口、生成提示注入与人工审核。
 - [~] 生成思政融入材料，明确关联的思政元素和引用来源。已展示知识点-思政元素追溯摘要；2026-04-24 已补教材解析阶段对相关 Resource 摘录的上下文引用、解析结果 citation 字段、教学材料 trace/Markdown 中的来源标题/链接/摘录/解释展示，并在课程级发布规则中支持案例思政标签约束；但当前仍基于资源摘录而非高保真全文原文，证据可信度与来源审计仍需加强。
 - [~] 生成考核题目、参考答案、评分要点。已接教师侧结构化题目编辑与版本保存，并支持题型、难度、选项、知识点 ID、参考答案、评分点的生成校验、编辑保存、预览与 Markdown 导出；发布版本会拒绝题干/参考答案不完整、选择题无选项，以及选择题参考答案无法匹配选项。仍需题型分布比例、知识点 ID 有效性与更完整自动评估。
-- [~] 教师可编辑、保存、重新生成、导出教学内容。已实现编辑、草稿保存、版本提交、版本回看、显式版本回退为草稿与重生成；已支持统一版式预览和 Markdown 导出，按用户 2026-04-23 最新要求不再要求 DOCX 导出。
+- [~] 教师可编辑、保存、重新生成、导出教学内容。已实现编辑、草稿保存、版本提交、版本回看、显式版本回退为草稿与重生成；已支持统一版式预览和 Markdown 导出；2026-04-25 已修复上传完成页 Save Draft / Save Version 易因空请求或业务校验表现为 500 的问题，并优化长内容输入行布局；按用户 2026-04-23 最新要求不再要求 DOCX 导出。
 - [x] 生成内容与原始文档、知识点、思政知识库建立追溯关系。已同时保存 `trace_json` 与结构化追溯行，支持按任务/版本/课程/知识点/思政元素检索与分页。
 
 ## 八、AI 助手与多模型能力
-- [x] AI 对话页面和会话保存基础能力。
-- [~] 前端 AI 运行时入口与展示。按用户当前要求，AI 助手已收口为固定本地 OpenAI 兼容运行时 `http://localhost:8317/v1` / `gpt-5.4`，不再暴露失真的 DeepSeek/Gemini 切换；如需恢复正式多模型能力，仍需独立配置页与真实 provider 联调。
+- [x] AI 对话页面、会话保存与历史展示基础能力。2026-04-25 已接入前端历史会话列表、切换、删除、新会话入口，并在首轮对话后由后端生成短标题摘要。
+- [~] 前端 AI 运行时入口与展示。按用户当前要求，AI 助手已收口为固定本地 OpenAI 兼容运行时 `http://localhost:8317/v1` / `gpt-5.4`，不再暴露失真的 DeepSeek/Gemini 切换；管理员 `Model Settings` 可视化 provider 和场景路由，普通用户也可在 AI Assistant 顶部与空态只读查看当前 provider/model/base URL。
 - [~] 后端 AI 路由已统一到本地 OpenAI 兼容接口 `http://localhost:8317/v1` 和 `gpt-5.4`，聊天、选段解释、资源抓取 AI 摘要、上传解析流水线、教学内容生成与学习路径建议均复用同一入口；因本地兼容接口 `/responses` 与非流式 `/chat/completions` 仍返回空正文，当前已切为跳过 `/responses` 并直接使用流式 `chat.completions`。
-- [~] RAG 增强回答。已具备 chunk 级检索、结构化引用展示和 FOUND/WEAK_MATCH/NO_CONTEXT 提示，并补入局部向量检索能力：课程资源库可做知识点语义搜索，选段解释新记录会异步写入 `selection_explain` 向量索引以支持相似推荐；2026-04-24 已将聊天主链路切为优先检索 `knowledge_points`/`ideology_matches` 向量上下文，无命中时回落到轻量检索，并返回 `VECTOR` citations；同日已补新写入向量 payload 的 `source/source_url` 元数据透传。仍需重排序、历史向量来源回填、弱匹配阈值和 RAG 自动评估。
-- [~] 按业务场景区分模型用途，例如聊天、文档解析、视觉分析、题目生成。已新增后端 `ai.routes.*` 环境变量路由，覆盖聊天、文档解析、思政匹配、题目生成、资源抓取和学习路径建议；视觉分析仍未接入，且仍需真实多 provider 联调。
-- [ ] 模型配置页面或至少完善环境变量模板和部署说明。
+- [~] RAG 增强回答。已具备 chunk 级检索、结构化引用展示和 FOUND/WEAK_MATCH/NO_CONTEXT 提示，并补入局部向量检索能力：课程资源库可做知识点语义搜索，选段解释新记录会异步写入 `selection_explain` 向量索引以支持相似推荐；2026-04-24 已将聊天主链路切为优先检索 `knowledge_points`/`ideology_matches` 向量上下文，无命中时回落到轻量检索，并返回 `VECTOR` citations；同日已补新写入向量 payload 的 `source/source_url` 元数据透传；2026-04-25 已要求普通 AI 助手回答使用纯文本，前端继续以 `pre-wrap` 文本渲染。仍需重排序、历史向量来源回填、弱匹配阈值和 RAG 自动评估。
+- [~] 按业务场景区分模型用途，例如聊天、文档解析、视觉分析、题目生成。已新增后端 `ai.routes.*` 环境变量路由，并补充 `ai_route_configs` 可视化配置表和管理员路由保存接口，覆盖聊天、文档解析、思政匹配、题目生成、资源抓取、学习路径、视觉分析和 embedding；DB 配置尚未接入 `AiIntelligenceService` 运行时热切换，真实多 provider 联调仍未完成。
+- [~] 模型配置页面或至少完善环境变量模板和部署说明。已新增 `ai_provider_configs` / `ai_route_configs`、`/api/admin/ai-providers` provider 与 routes 接口、配置完整性测试接口和管理员 `Model Settings` 页面；仍需真实连接测试、运行时 DB 路由接入、环境变量模板和部署说明。
 
 ## 九、学生学习支持
 - [x] 学生端独立首页和知识图谱入口。
 - [~] 学习路径推荐展示。仍需结合课程进度、掌握度、错题、兴趣标签。
-- [ ] 学习行为采集，包括学习时长、停留时间、答题正确率、路径变化。
-- [ ] 学生学习记录、历史报告、推荐原因说明。
-- [ ] 个性化复习建议和学习资源推荐。
-- [ ] 学生端与 AI 助手、知识图谱、课程资源之间形成闭环。
+- [~] 学习行为采集，包括学习时长、停留时间、答题正确率、路径变化。已补 `student_activity_events` 事件流、学生端页面停留/资源打开/图谱节点/AI 提问埋点、今日学习时长统计，以及学生首页内嵌单选测验入口；答题提交会保存题目快照、答案、正确性和知识点，并聚合正确率。仍缺更完整的历史报告和正式考试能力。
+- [~] 学生学习记录、历史报告、推荐原因说明。已新增学习报告接口、最近学习记录接口和学生首页报告卡片，并让学生端课程资源库按课程绑定读取课程；2026-04-25 审查后学生默认入口已收口到 `StudentHome`，同日已将 Learning Report 最近活动过滤掉 `page_stay` 页面访问流水，增加总学习时间并混入 AI 会话标题。历史报告深挖与推荐原因说明仍未完成。
+- [~] 个性化复习建议和学习资源推荐。已基于学生预警记录展示反馈建议，并提供跳转 AI 助手/知识图谱入口；课程资源库已按 `course_students` 绑定过滤，仍未结合错题和掌握度生成正式个性化复习资源。
+- [~] 学生端与 AI 助手、知识图谱、课程资源之间形成闭环。已通过埋点把 AI 提问、图谱节点查看、课程资源打开纳入学生学习报告，并接入预警反馈建议跳转 AI 助手/知识图谱；2026-04-25 审查后学生端课程资源库可只读查看已发布课程材料，同日补齐基于课程材料题目的真实答题入口和正确率聚合。仍缺课程绑定画像深挖和正式复习建议生成。
 
 ## 十、学生监测与预警
-- [~] 后端已有按专注度、正确率、学习时长、情绪字段计算预警等级的服务。
-- [ ] 前端学习行为上报接口和页面埋点。
+- [~] 后端已有按专注度、正确率、学习时长、情绪字段计算预警等级的服务，并新增基于 `student_activity_events` 的预警记录生成、汇总、列表、状态更新和学生反馈接口；视觉/真实答题维度仍未接入。
+- [~] 前端学习行为上报接口和页面埋点。已新增 `POST /api/student/events` 和学生端 `TrackingContext`，覆盖首页停留、资源打开、图谱节点查看、AI 提问，并能进入预警生成链路；仍需答题和视觉采集联动。
 - [ ] 摄像头授权、视频流采集、关键帧抽取和关闭机制。
 - [ ] 视觉模型或等价服务分析专注度、情绪、疲劳状态。
-- [ ] 教师端预警列表、等级分布、学生详情、处理状态。
-- [ ] 学生端反馈建议、心理调节提示、复习推荐。
+- [~] 教师端预警列表、等级分布、学生详情、处理状态。已新增教师端 `AlertConsole`，支持汇总、筛选、详情展开、生成预警和状态处理；仍缺学生画像详情页、分页后端参数和真实浏览器手动验收。
+- [~] 学生端反馈建议、心理调节提示、复习推荐。已在 `StudentHome` 展示预警反馈建议并可跳转 AI 助手/知识图谱；仍缺关闭/已读状态、心理调节细分与正式复习资源推荐。
 - [ ] 隐私合规说明、授权提示和演示模式说明。
 
 ## 十一、课程资源库与教师工作台
 - [x] 课程资源列表、搜索、分类展示基础能力。
-- [~] 教师 Dashboard 统计卡片、趋势图和活动列表。仍需确认统计是否来自真实数据。
-- [~] 课程资源与具体课程、章节、知识点绑定。已实现课程资源库按课程查看已保存教学材料与版本分组；章节、知识点级绑定仍未完成。
-- [~] 教师可查看资源解析状态、生成内容状态、图谱同步状态。当前已可查看课程下教学材料最新版本状态、历史版本与只读预览；解析状态聚合与图谱同步状态仍未接入。
-- [ ] 资源审核、下架、删除、重新同步流程。
+- [~] 教师 Dashboard 统计卡片、趋势图和活动列表。已新增 Dashboard overview 聚合接口与前端聚合工作台，第一屏展示待处理预警、待审核资源、待审核匹配、失败解析任务、材料发布统计、最近解析任务和学习事件趋势，并支持跳转处理；仍需真实浏览器手动验收和更细教师归属过滤。
+- [~] 课程资源与具体课程、章节、知识点绑定。已实现课程章节表、章节列表/新增/编辑接口、教学材料版本 `chapterId` 归属、资源库按课程章节分组展示和未绑定材料 `Unassigned Materials` 分组，并新增学生-课程绑定关系驱动学生端课程过滤；章节-知识点直接绑定仍未完成。
+- [~] 教师可查看资源解析状态、生成内容状态、图谱同步状态。当前已可查看课程下教学材料最新版本状态、历史版本、只读预览，并新增课程状态汇总接口展示章节数、解析任务数、材料版本数、草稿数、发布数和知识点数；真实图谱同步状态仍未接入。
+- [~] 资源审核、下架、删除、重新同步流程。已新增 `PENDING/APPROVED/REJECTED` 审核状态、审核列表和批准/拒绝入口，并让资源列表和聊天上下文检索默认只读取 `APPROVED` 资源；下架、重新同步和真实浏览器验收仍未完成。
 
 ## 十二、数据、配置与部署
-- [~] MySQL schema 和示例数据存在。仍需区分正式 schema、迁移脚本、演示 seed 数据。
-- [~] 前后端构建均可通过。已通过懒加载与基础拆包消除前端 500KB chunk 告警；配置模板与部署说明仍未补齐。
-- [ ] `.env.example` 或配置模板，移除默认真实或疑似真实 key。
-- [ ] README 补齐本地启动、数据库初始化、环境变量、演示账号、常见问题。
-- [ ] 文件上传目录、日志目录、跨域、代理、HTTPS 等部署说明。
+- [~] MySQL schema 和示例数据存在。已同步新增模型配置表、课程学生绑定表、知识图谱变更日志表到主 schema 与迁移脚本，并在 README 区分首次导入 `schema.sql`、已有库执行迁移脚本和自动升级脚本；仍缺正式演示 seed 数据。
+- [~] 前后端构建均可通过。已通过懒加载与基础拆包消除前端 500KB chunk 告警，并补齐 README 本地启动、端口和常用构建命令；仍需生产部署脚本。
+- [x] `.env.example` 或配置模板，移除默认真实或疑似真实 key。已新增 `.env.example`，覆盖前端、MySQL、JWT、AI 路由、OpenAI-compatible、MinerU、Qdrant、embedding 和上传目录，均使用占位符或本地演示默认值。
+- [x] README 补齐本地启动、数据库初始化、环境变量、演示账号、常见问题。已补前端、后端、MySQL、AI、MinerU、Qdrant、账号准备、真实页面入口、FAQ 和 `.env.example` 使用说明。
+- [~] 文件上传目录、日志目录、跨域、代理、HTTPS 等部署说明。README 已说明上传目录和本地演示限制；日志目录、代理、HTTPS 与生产安全策略仍需正式部署文档。
 - [ ] 生产环境 token、文件、接口权限安全策略。
 
 ## 十三、测试与验收
 - [~] 后端单元测试和核心 service 测试。已覆盖上传结果接口、教师材料服务关键分支、聊天/鉴权/路径推荐/课程创建/知识图谱坐标更新/资源抓取兼容入口等控制器回归，并新增资源抓取去重/空标签回退、OpenAI 兼容响应提取与路由策略、上传历史/实时日志、语义搜索控制器、向量服务降级解析、选段解释触发异步索引等 service 回归；仍需扩展集成场景与异常路径。
-- [~] 前端关键页面 smoke test 或手动验收脚本。已在 `Draft/2026-04-23-1628-upload-semantic-closeout.md` 补上传解析与语义检索的手动验收脚本，仍未做自动化前端 smoke test。
-- [ ] API 集成测试，覆盖认证、上传、图谱、资源、聊天、预警。
-- [ ] 爬虫失败、AI 失败、上传失败、数据库不可用等异常场景测试。
-- [ ] 毕设演示脚本，包括教师端主线、学生端主线、知识库更新主线。
+- [~] 前端关键页面 smoke test 或手动验收脚本。已在 `Draft/2026-04-23-1628-upload-semantic-closeout.md` 补上传解析与语义检索的手动验收脚本，并新增 `Draft/2026-04-25-0305-demo-script.md` 覆盖教师、学生、知识库更新、管理员四条主线；仍未做自动化前端 smoke test。
+- [~] API 集成测试，覆盖认证、上传、图谱、资源、聊天、预警。已新增预警 Controller 定向测试覆盖生成、汇总、列表、状态更新、学生反馈接口，课程章节/材料绑定/状态汇总 Controller 定向测试，知识源管理/运行日志/资源审核 Controller 定向测试，关键词任务 Controller 与接受重复来源结果 service 定向测试、匹配审核 Controller 定向测试、模型配置 Controller 定向测试、管理员用户/课程学生绑定与学生课程读取 Controller 定向测试，以及知识图谱关系编辑/重复提示/删除/撤销 Controller 定向测试；仍缺跨模块真实数据库集成测试。
+- [~] 爬虫失败、AI 失败、上传失败、数据库不可用等异常场景测试。已在 `Draft/2026-04-25-0305-test-cases.md` 列出异常测试用例；仍需逐项手工执行并填写实际结果。
+- [x] 毕设演示脚本，包括教师端主线、学生端主线、知识库更新主线。已新增四条主线脚本，并补管理员控制台与模型配置主线。
 
 ## 后续维护要求
 - 每次功能完善后，必须在对应条目中更新 `[ ]`、`[~]`、`[x]` 状态。
@@ -111,6 +111,27 @@
 - 如果发现 `/Draft/毕设.md`、本清单和用户当前要求冲突，以用户当前明确要求优先，并在维护记录中说明取舍原因。
 
 ## 维护记录
+- `2026-04-25 17:30` | `teacher-dashboard-overview` | 完成 `2026-04-25-1633-prd-demo-richness-plan` 的 P0-2 最小闭环：新增 `/api/dashboard/overview`，聚合待处理预警、待审核资源、待审核匹配、失败解析任务、最近解析任务、材料发布统计和近 7 日学习事件趋势；教师 Dashboard 第一屏新增可跳转待办卡片、材料发布卡片和最近解析任务列表，并修正 Open Alerts 跳转到 Alerts。关键文件：`backend/src/main/java/com/smartedu/service/DashboardService.java`、`backend/src/main/java/com/smartedu/controller/DashboardController.java`、`views/Dashboard.tsx`、`services/api.ts`、`backend/src/test/java/com/smartedu/service/DashboardServiceTest.java`、`backend/src/test/java/com/smartedu/controller/DashboardControllerTest.java`。仍需：真实浏览器手动验收和更细教师归属过滤。已验证：后端编译、Dashboard 定向测试、`npm run build` 通过。
+- `2026-04-25 16:47` | `student-quiz-accuracy` | 完成 `2026-04-25-1633-prd-demo-richness-plan` 的 P0-1 最小闭环：新增学生测验题目读取/提交接口，复用教学材料单选题，提交后用 `answer_submit` 事件保存题目快照、答案、正确性和知识点；学生首页内嵌 `Practice / Quiz` 并展示答题次数、正确数、正确率和薄弱知识点数量；预警服务纳入近 7 日低正确率。关键文件：`backend/src/main/java/com/smartedu/controller/StudentQuizController.java`、`backend/src/main/java/com/smartedu/service/StudentQuizService.java`、`backend/src/main/java/com/smartedu/service/StudentActivityEventService.java`、`backend/src/main/java/com/smartedu/service/AlertService.java`、`views/StudentHome.tsx`、`services/api.ts`、`backend/src/test/java/com/smartedu/controller/StudentQuizControllerTest.java`。仍需：浏览器手动验收和带真实材料题目的端到端演示。已验证项见本次变更文档。
+- `2026-04-25 16:24` | `prd-implementation-review` | 审查 `Draft/PRD.md` 功能实现度与代码质量，并对明显低风险问题直接修复：管理员用户创建/更新新增角色白名单和更新密码长度校验，避免未知角色被静默归一为默认角色；预警列表/状态更新新增等级与状态白名单、大小写归一和非法输入拒绝；前端 mock bootstrap 移除 `as any` 并与后端教师权限入口对齐。关键文件：`backend/src/main/java/com/smartedu/controller/AdminController.java`、`backend/src/main/java/com/smartedu/controller/AlertController.java`、`contexts/AuthContext.tsx`、`backend/src/test/java/com/smartedu/controller/AdminControllerTest.java`、`backend/src/test/java/com/smartedu/controller/AlertControllerTest.java`、`Draft/2026-04-25-1624-prd-implementation-review.md`。已验证：定向 Maven 测试、完整 `mvn -q test`、`npm run build` 均通过。仍需：真实浏览器手动验收、接口级权限与越权测试、真实 provider/视觉/答题/定时调度等 PRD 剩余项。
+- `2026-04-25 16:05` | `course-ai-graph-review` | 审查 `2026-04-25-1430-course-ai-graph-report` 涉及改动并做最小健壮性修复：修正 AI Assistant 双列 grid 下输入区落入侧栏列的问题；将学生最近活动 `page_stay` 过滤前移到 SQL 查询阶段，避免先 `LIMIT` 再过滤导致真实学习记录被挤掉；新增 `StudentActivityEventServiceTest` 固化查询口径。关键文件：`views/AIAssistant.tsx`、`backend/src/main/java/com/smartedu/service/StudentActivityEventService.java`、`backend/src/test/java/com/smartedu/service/StudentActivityEventServiceTest.java`、`Draft/2026-04-25-1605-course-ai-graph-review.md`。已验证：定向 Maven 测试、完整 `mvn -q test`、`npm run build` 均通过。仍需：真实浏览器手动验收 AI 历史会话、学生首页 Learning Report 和课程管理入口。
+- `2026-04-25 14:30` | `course-ai-graph-report` | 完成用户本轮多模块收口：新增教师 Dashboard 到隐藏课程管理页入口，支持课程详情编辑、课程状态查看、课程学生添加/移除；AI 助手前端接入历史会话列表/切换/删除/新建，后端首轮会话生成短标题并约束普通回答为纯文本；上传解析结果停止同步写入知识图谱，仅保留解析任务、投影表和向量索引；资源/新闻自动入图节点采用初始避让布局，自动思政匹配设为 `APPROVED` 以便生成即连线；学生 Learning Report 改为总学习时间和 AI 会话标题，不再展示 `page_stay` 页面访问流水。关键文件：`types.ts`、`layouts/TeacherShell.tsx`、`views/CourseManagement.tsx`、`views/AIAssistant.tsx`、`views/StudentHome.tsx`、`services/api.ts`、`backend/src/main/java/com/smartedu/controller/CourseController.java`、`backend/src/main/java/com/smartedu/service/CourseService.java`、`backend/src/main/java/com/smartedu/service/AiIntelligenceService.java`、`backend/src/main/java/com/smartedu/service/ChatService.java`、`backend/src/main/java/com/smartedu/service/KnowledgeIngestionService.java`、`backend/src/main/java/com/smartedu/service/StudentActivityEventService.java`、`Draft/2026-04-25-1430-course-ai-graph-report.md`。仍需：运行后端测试/前端构建并做浏览器手动验收；课程接口级权限、课程字段业务枚举和 AI 纯文本强约束仍可继续增强。
+- `2026-04-25 13:40` | `upload-editor-followup-fix` | 二次修复上传完成页教学编辑体验与保存失败：补齐 Parse Result Correction 与 Teaching Editor 中 `Cases`、`Options`、`Scoring Points` 行宽，让输入框填满 Remove 按钮外的剩余宽度；新增 `migration_teaching_material_trace_resource_columns.sql` 幂等修复旧库 `teaching_material_traces` 缺少 `resource_title` 等资源引用列导致 `Save Draft` 500 的问题，并收紧 `scripts/update_database.ps1` 对原 trace 迁移的结构识别条件。关键文件：`components/ParseResultCorrectionCard.tsx`、`components/TeachingMaterialEditorCard.tsx`、`scripts/update_database.ps1`、`backend/src/main/resources/migration_teaching_material_trace_resource_columns.sql`、`Draft/2026-04-25-1340-upload-editor-followup-fix.md`。已验证：数据库 dry-run 与正式迁移通过，备份 `Draft/db-backups/smart_education_20260425_133810.sql`，`schema_migrations` 记录 repair migration 为 `executed`，五个资源引用列均存在；`mvn -f backend/pom.xml test -Dtest=UploadControllerTest,TeachingMaterialServiceTest,AiIntelligenceServiceTest` 和 `npm run build` 通过。仍需：浏览器上传或打开 `.md` 任务后手动确认保存草稿/版本与输入框真实视觉效果。
+- `2026-04-25 12:20` | `upload-editor-save-ui-fix` | 修复上传完成页教学编辑体验与保存 500：移除 `AI Analysis` 展示，拉宽 `Chapter Outline`、`Teaching Focus`、`Cases` 输入行，移除 Teaching Editor 中重复的 Trace Summary 展示；后端保存接口补业务异常收口，教学材料保存归一化空请求、校验任务 userId，并跳过无效 trace 行。关键文件：`backend/src/main/java/com/smartedu/controller/UploadController.java`、`backend/src/main/java/com/smartedu/service/TeachingMaterialService.java`、`backend/src/test/java/com/smartedu/controller/UploadControllerTest.java`、`backend/src/test/java/com/smartedu/service/TeachingMaterialServiceTest.java`、`views/ResourceUpload.tsx`、`components/ParseResultCorrectionCard.tsx`、`components/TeachingMaterialEditorCard.tsx`、`Draft/2026-04-25-1220-upload-editor-save-ui-fix.md`。已验证：`mvn -f backend/pom.xml test -Dtest=UploadControllerTest,TeachingMaterialServiceTest,AiIntelligenceServiceTest` 和 `npm run build` 通过。仍需：浏览器上传 `.md` 后保存草稿/版本手动验收。
+- `2026-04-25 11:52` | `upload-parsed-content-json-fix` | 修复资源上传 Markdown 文档后 `parse_tasks.parsed_content` 写入非法 JSON 导致 MySQL 报 `Invalid JSON text` 的问题：解析流程改为保存 `DocumentStructureDto` JSON，并把原始 Markdown/文本放入 `rawMarkdown`；任务状态接口继续返回 Markdown 字符串供前端渲染。关键文件：`backend/src/main/java/com/smartedu/service/AiIntelligenceService.java`、`backend/src/main/java/com/smartedu/controller/UploadController.java`、`backend/src/test/java/com/smartedu/controller/UploadControllerTest.java`、`backend/src/test/java/com/smartedu/service/AiIntelligenceServiceTest.java`。已验证：`mvn -f backend/pom.xml test -Dtest=UploadControllerTest,AiIntelligenceServiceTest` 通过。仍需：浏览器端重新上传 `.md` 文件手动确认轮询与渲染效果。
+- `2026-04-25 10:41` | `database-update-script` | 新增已有数据库升级脚本 `scripts/update_database.ps1`，按当前迁移顺序执行 dry-run、备份、`schema_migrations` 记录、schema 现状识别和缺失迁移执行；README 增加长期未更新数据库的推荐升级命令和 MySQL bin 路径参数，并修复 `migration_subject_ideology_split.sql` 缺少 `deleted` 列与多处 MySQL 8.0.40 不支持 `ADD COLUMN IF NOT EXISTS` 的迁移兼容问题。已在本机 `smart_education` 执行正式升级，生成 `Draft/db-backups/smart_education_20260425_111946.sql`，`schema_migrations` 共 20 条，复跑 dry-run 全部 skip。关键文件：`scripts/update_database.ps1`、`README.md`、`backend/src/main/resources/migration_subject_ideology_split.sql`、`backend/src/main/resources/migration_phase2_projection_tables.sql`、`backend/src/main/resources/migration_material_trace_and_course_binding.sql`、`backend/src/main/resources/migration_course_chapters.sql`、`backend/src/main/resources/migration_crawl_sources_review.sql`、`Draft/2026-04-25-1041-database-update-script.md`。仍需：启动后端和真实浏览器按演示脚本回归；异常中断后的半执行状态仍需按报错人工核对。
+- `2026-04-25 10:30` | `review-20260424` | 审查 `2026-04-24-2312-student-learning-report` 起学生学习报告之后的功能扩展，修复 parse correction 题目字段校验、学生默认页/允许视图、学生课程材料可见性与教师操作收口，并补 Vite env 类型声明。关键文件：`backend/src/main/java/com/smartedu/service/ParseTaskCorrectionService.java`、`backend/src/main/java/com/smartedu/service/RoleAccessService.java`、`backend/src/test/java/com/smartedu/service/RoleAccessServiceTest.java`、`views/ResourceLibrary.tsx`、`vite-env.d.ts`、`Draft/2026-04-25-1030-review-20260424.md`。仍需：浏览器手动验收、真实数据库迁移执行、接口级权限验证。已验证：`mvn -q test`、`npx tsc --noEmit`、`npm run build` 通过。
+- `2026-04-25 03:15` | `env-example-template` | 补齐本地环境变量模板：新增 `.env.example`，覆盖 Vite/Gemini、Spring Boot 端口、MySQL、JWT、AI 路由、OpenAI-compatible 默认运行时、DeepSeek/Gemini/proxy 占位、pipeline limits、embedding、Qdrant、MinerU 和上传目录；README 增加复制 `.env.example` 到 `.env.local` 的说明。关键文件：`.env.example`、`README.md`、`Draft/2026-04-25-0315-env-example-template.md`、`Draft/CHANGE-INDEX.md`。仍需：生产部署安全说明、生产密钥轮换策略和真实环境变量加载方式统一。
+- `2026-04-25 03:05` | `demo-readme-testcases` | 完成 PRD 第 10 包 README、演示脚本与测试用例表：扩写 README 本地启动、数据库初始化、AI/MinerU/Qdrant 配置、账号准备、真实页面入口和 FAQ；新增四条演示主线脚本与功能/异常测试用例表；同步 PRD 与本清单状态。关键文件：`README.md`、`Draft/2026-04-25-0305-demo-script.md`、`Draft/2026-04-25-0305-test-cases.md`、`Draft/2026-04-25-0305-demo-readme-testcases.md`、`Draft/PRD.md`、`Draft/CHANGE-INDEX.md`。仍需：真实浏览器按脚本手动验收、填写测试实际结果、生产部署安全说明和 Playwright 自动化。
+- `2026-04-25 02:55` | `knowledge-relation-governance` | 完成 PRD 第 9 包知识图谱关系治理 demo 闭环：新增 `knowledge_change_logs`、关系编辑接口、重复关系校验、删除记录、最近一次撤销接口，前端 `KnowledgeGraph` 节点详情展示入边/出边并支持真实关系类型编辑/删除，负 id 合成关系只读。关键文件：`backend/src/main/java/com/smartedu/controller/KnowledgeController.java`、`backend/src/main/java/com/smartedu/service/KnowledgeService.java`、`backend/src/main/java/com/smartedu/entity/KnowledgeChangeLog.java`、`backend/src/main/java/com/smartedu/mapper/KnowledgeChangeLogMapper.java`、`backend/src/main/java/com/smartedu/mapper/KnowledgeRelationMapper.java`、`backend/src/main/resources/migration_knowledge_change_logs.sql`、`backend/src/main/resources/schema.sql`、`views/KnowledgeGraph.tsx`、`services/api.ts`、`Draft/2026-04-25-0255-knowledge-relation-governance.md`。仍需：真实数据库执行迁移、浏览器手动验收、节点字段编辑增强、导入历史和多人冲突处理。
+- `2026-04-25 02:45` | `admin-console` | 完成 PRD 第 8 包管理员控制台 demo 闭环：新增 `course_students`、管理员用户分页/创建/编辑/启停接口、课程学生列表/添加/移除接口、学生课程读取接口，管理员端新增 `Admin Console` 页面和菜单权限，学生端 `ResourceLibrary` 改为按绑定课程读取。关键文件：`backend/src/main/java/com/smartedu/controller/AdminController.java`、`backend/src/main/java/com/smartedu/service/AdminUserService.java`、`backend/src/main/java/com/smartedu/service/CourseStudentService.java`、`backend/src/main/resources/migration_course_students.sql`、`backend/src/main/resources/schema.sql`、`views/AdminConsole.tsx`、`views/ResourceLibrary.tsx`、`services/api.ts`、`layouts/TeacherShell.tsx`、`components/Sidebar.tsx`、`Draft/2026-04-25-0245-admin-console.md`。仍需：真实数据库执行迁移、浏览器手动验收、接口级 admin 权限验证、教师课程归属管理、班级/组织管理和真实登录账号端到端验收。
+- `2026-04-25 02:35` | `model-settings` | 完成 PRD 第 7 包模型配置页与场景路由可视化 demo 闭环：新增 `ai_provider_configs`、`ai_route_configs`、provider 列表/保存/测试接口、route 列表/保存接口，管理员端新增 `Model Settings` 页面和菜单权限；密钥不回显，仅展示 `keyConfigured`。关键文件：`backend/src/main/java/com/smartedu/controller/AiProviderConfigController.java`、`backend/src/main/java/com/smartedu/service/AiProviderConfigService.java`、`backend/src/main/resources/migration_ai_provider_configs.sql`、`backend/src/main/resources/schema.sql`、`views/ModelSettings.tsx`、`services/api.ts`、`layouts/TeacherShell.tsx`、`components/Sidebar.tsx`、`Draft/2026-04-25-0235-model-settings.md`。仍需：真实数据库执行迁移、浏览器手动验收、接口级权限验证、真实 provider 连接测试、运行时 DB 路由热切换和环境变量模板/部署说明。
+- `2026-04-25 02:27` | `match-review` | 完成 PRD 第 6 包专业知识-思政元素匹配审核 demo 闭环：新增 `subject_ideology_matches` 审核字段、`subject_ideology_match_reviews` 历史表、匹配审核列表/批准/拒绝/修改/历史接口，教师端新增 `MatchReview` 页面和菜单权限；知识图谱合成关系与轻量检索上下文只读取 `APPROVED` 匹配。关键文件：`backend/src/main/java/com/smartedu/controller/MatchReviewController.java`、`backend/src/main/java/com/smartedu/service/MatchReviewService.java`、`backend/src/main/resources/migration_match_reviews.sql`、`views/MatchReview.tsx`、`services/api.ts`、`layouts/TeacherShell.tsx`、`components/Sidebar.tsx`、`Draft/2026-04-25-0227-match-review.md`。仍需：真实数据库执行迁移、浏览器手动验收、接口级权限验证、重新生成和一键回滚。
+- `2026-04-25 02:17` | `keyword-tasks` | 完成 PRD 第 5 包课程关键词采集任务 demo 闭环：新增 `keyword_tasks`、`keyword_task_items`、关键词任务创建/列表/详情/运行/接受接口、任务同步运行逻辑、已审核资源检索与 AI 摘要，教师端新增 `KeywordTasks` 页面和菜单权限；接受重复来源链接时复用既有资源，避免 `resources.uk_source_url` 冲突。关键文件：`backend/src/main/java/com/smartedu/controller/KeywordTaskController.java`、`backend/src/main/java/com/smartedu/service/KeywordTaskService.java`、`backend/src/main/resources/migration_keyword_tasks.sql`、`backend/src/main/resources/schema.sql`、`views/KeywordTasks.tsx`、`services/api.ts`、`layouts/TeacherShell.tsx`、`components/Sidebar.tsx`、`Draft/2026-04-25-0217-keyword-tasks.md`。仍需：真实数据库执行迁移、浏览器手动验收、真实外部资讯 API、接口级权限验证和更完整课程知识库归属策略。
+- `2026-04-25 02:05` | `crawl-source-review` | 完成 PRD 第 4 包知识源配置、抓取日志与人工审核 demo 闭环：新增 `crawl_sources`、`crawl_run_logs`、来源列表/新增/编辑/触发接口、抓取运行日志查询、资源审核字段与审核状态更新接口，教师端新增 `SourceManagement` 页面，资源列表和聊天上下文检索默认只读取 `APPROVED` 资源。关键文件：`backend/src/main/java/com/smartedu/controller/CrawlSourceController.java`、`backend/src/main/java/com/smartedu/service/CrawlSourceService.java`、`backend/src/main/java/com/smartedu/service/ResourceCrawlService.java`、`backend/src/main/java/com/smartedu/service/ResourceService.java`、`backend/src/main/resources/migration_crawl_sources_review.sql`、`views/SourceManagement.tsx`、`services/api.ts`、`Draft/2026-04-25-0205-crawl-source-review.md`。仍需：真实数据库执行迁移、浏览器手动验收、定时调度、失败重试、下架/重新同步流程和外部来源扩展。
+- `2026-04-25 01:35` | `course-chapters-material-status` | 完成 PRD 第 3 包课程章节、知识点绑定与资源状态汇总的必做闭环：新增 `course_chapters`、章节列表/新增/编辑接口、材料版本章节归属、资源库按章节分组、上传/编辑页章节选择和课程状态汇总接口。关键文件：`backend/src/main/java/com/smartedu/controller/CourseController.java`、`backend/src/main/java/com/smartedu/service/CourseService.java`、`backend/src/main/java/com/smartedu/service/TeachingMaterialService.java`、`backend/src/main/resources/migration_course_chapters.sql`、`views/ResourceLibrary.tsx`、`views/ResourceUpload.tsx`、`services/api.ts`、`Draft/2026-04-25-0135-course-chapters-material-status.md`。仍需：真实数据库执行迁移、浏览器手动验收、章节知识点绑定、真实图谱同步状态展示。
+- `2026-04-25 00:20` | `student-alert-feedback` | 完成 PRD 第 2 包学生预警中心与学生反馈 demo 闭环：新增 `student_alert_records`、预警生成/汇总/列表/状态更新/学生反馈接口，教师端新增 `AlertConsole` 菜单与页面，学生首页展示反馈建议并跳转 AI 助手/知识图谱。关键文件：`backend/src/main/java/com/smartedu/controller/AlertController.java`、`backend/src/main/java/com/smartedu/service/AlertService.java`、`backend/src/main/resources/migration_student_alert_records.sql`、`views/AlertConsole.tsx`、`views/StudentHome.tsx`、`services/api.ts`、`Draft/2026-04-25-0020-student-alert-feedback.md`。仍需：真实数据库执行迁移、浏览器手动验收、视觉采集/模型、学生画像详情、答题正确率和正式复习资源推荐。
+- `2026-04-24 23:12` | `student-learning-report` | 完成 PRD 第 1 包学生行为采集与学习报告 demo 闭环：新增 `student_activity_events`、批量上报接口、学习报告接口、最近活动接口，学生端新增 `TrackingContext`，覆盖页面停留、课程/材料打开、图谱节点查看、AI 提问，并在 `StudentHome` 展示今日学习时长、事件数、知识点访问数、7 日趋势和最近学习记录。关键文件：`backend/src/main/java/com/smartedu/controller/StudentActivityEventController.java`、`backend/src/main/java/com/smartedu/service/StudentActivityEventService.java`、`backend/src/main/resources/migration_student_activity_events.sql`、`contexts/TrackingContext.tsx`、`layouts/StudentShell.tsx`、`views/StudentHome.tsx`、`views/ResourceLibrary.tsx`、`views/KnowledgeGraph.tsx`、`views/AIAssistant.tsx`、`services/api.ts`、`Draft/2026-04-24-2312-student-learning-report.md`。仍需：真实答题入口与正确率、教师预警中心、学生反馈建议、浏览器端手动验收。
 - `2026-04-24 20:24` | `vector-source-metadata` | 补齐 P0 RAG 向量命中的来源元数据：`SemanticHitDto` 增加 `source/sourceUrl`，`VectorIndexService` 从 Qdrant payload 读取 `source/source_url`，`VectorIndexAsyncService` 在新写入知识点/思政匹配向量时复用首个有效 `ResourceCitationDto` 写入来源和链接，`ChatService` 将其透传到 `VECTOR` citation。审查后将来源选择从“第一条 citation”收紧为“第一条带 source 或 sourceUrl 的 citation”，并新增 payload 生成回归测试。关键文件：`backend/src/main/java/com/smartedu/dto/SemanticHitDto.java`、`backend/src/main/java/com/smartedu/service/VectorIndexService.java`、`backend/src/main/java/com/smartedu/service/VectorIndexAsyncService.java`、`backend/src/main/java/com/smartedu/service/ChatService.java`、`backend/src/test/java/com/smartedu/service/VectorIndexAsyncServiceTest.java`、`Draft/2026-04-24-2024-vector-source-metadata.md`。仍需：历史向量重新索引/回填、多来源展示、score 阈值/WEAK_MATCH、重排序和真实 Qdrant 浏览器手动验收。已验证：`mvn -f backend/pom.xml -Dtest=ChatServiceTest,ChatControllerTest,VectorIndexServiceTest,VectorIndexAsyncServiceTest,SemanticSearchControllerTest test` 通过。
 - `2026-04-24 19:52` | `chat-vector-rag` | 完成 P0 RAG 主链路向量化最小闭环：`ChatService.sendMessage` 先检索 `knowledge_points` 向量上下文，再按需检索 `ideology_matches`，命中时以 `FOUND` 和 `VECTOR` citation 返回；无向量上下文时保留原有 `KnowledgeRetrievalService.retrieveWithStatus` 轻量检索回落。审查后移除隐藏 DI 问题的 vector service null 兜底、对向量上下文去重，并将 raw source type 映射为稳定 citation 类型。关键文件：`backend/src/main/java/com/smartedu/service/ChatService.java`、`backend/src/test/java/com/smartedu/service/ChatServiceTest.java`、`backend/src/test/java/com/smartedu/controller/ChatControllerTest.java`、`Draft/2026-04-24-1952-chat-vector-rag.md`。仍需：一次 embedding 复用多 collection、score 阈值/WEAK_MATCH、重排序、RAG 自动评估与真实 Qdrant 浏览器手动验收。已验证：`mvn -f backend/pom.xml -Dtest=ChatServiceTest,ChatControllerTest test` 通过。
 - `2026-04-24 19:00` | `course-material-rules` | 完成 P0 教学内容质量的课程级规则最小闭环：新增 `course_material_rules` 表、`CourseMaterialRule`/Mapper，发布正式教学材料时按课程规则校验讲义最少字符数、必需章节和案例思政标签；无课程规则时不改变现有保存行为。审查后复用已加载 parse task，移除 mapper null 兜底，并补 `(course_id, updated_at, id)` 索引。关键文件：`backend/src/main/java/com/smartedu/service/TeachingMaterialService.java`、`backend/src/main/java/com/smartedu/entity/CourseMaterialRule.java`、`backend/src/main/java/com/smartedu/mapper/CourseMaterialRuleMapper.java`、`backend/src/main/resources/migration_course_material_rules.sql`、`backend/src/test/java/com/smartedu/service/TeachingMaterialServiceTest.java`。仍需：规则配置入口、AI 生成提示注入规则、不满足规则后的自动重生成提示与浏览器手动验收。已验证：`mvn -f backend/pom.xml -Dtest=TeachingMaterialServiceTest,UploadControllerTest,CourseControllerTest,TeachingMaterialControllerTest test` 通过。

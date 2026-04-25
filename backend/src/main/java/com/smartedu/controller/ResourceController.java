@@ -4,6 +4,7 @@ import com.smartedu.common.PageResult;
 import com.smartedu.common.Result;
 import com.smartedu.crawler.model.CrawlTaskStatus;
 import com.smartedu.dto.ResourceManualCrawlRequestDto;
+import com.smartedu.dto.ResourceReviewStatusUpdateRequestDto;
 import com.smartedu.entity.Resource;
 import com.smartedu.service.ResourceCrawlService;
 import com.smartedu.service.ResourceService;
@@ -49,6 +50,29 @@ public class ResourceController {
             return Result.notFound("资源不存在");
         }
         return Result.success(resource);
+    }
+
+    @GetMapping("/review")
+    public Result<List<Resource>> getReviewResources(@RequestParam(required = false) String reviewStatus) {
+        return Result.success(resourceService.getReviewResources(reviewStatus));
+    }
+
+    @PutMapping("/{id}/review-status")
+    public Result<Resource> updateReviewStatus(
+            @PathVariable Long id,
+            @RequestBody ResourceReviewStatusUpdateRequestDto request) {
+        if (request == null || request.getReviewStatus() == null || request.getReviewStatus().trim().isEmpty()) {
+            return Result.badRequest("Review status cannot be empty");
+        }
+        String reviewStatus = request.getReviewStatus().trim();
+        if (!List.of("PENDING", "APPROVED", "REJECTED").contains(reviewStatus)) {
+            return Result.badRequest("Invalid review status");
+        }
+        Resource updated = resourceService.updateReviewStatus(id, reviewStatus, request.getReviewerId());
+        if (updated == null) {
+            return Result.notFound("Resource not found");
+        }
+        return Result.success(updated);
     }
 
     /** 创建资源 */

@@ -402,16 +402,17 @@ export const ParseResultCorrectionCard: React.FC<ParseResultCorrectionCardProps>
                 </Button>
               </Space>
               {(documentStructure.chapterOutline || []).map((item, index) => (
-                <Space key={`chapter-${index}`} align="start" style={{ width: '100%' }}>
+                <div key={`chapter-${index}`} style={{ display: 'flex', gap: 8, width: '100%' }}>
                   <Input
                     value={item}
                     onChange={(event) => updateStringList('chapterOutline', index, event.target.value)}
                     maxLength={200}
+                    style={{ flex: 1, minWidth: 0 }}
                   />
-                  <Button danger onClick={() => removeStringListItem('chapterOutline', index)}>
+                  <Button danger style={{ flexShrink: 0 }} onClick={() => removeStringListItem('chapterOutline', index)}>
                     Remove
                   </Button>
-                </Space>
+                </div>
               ))}
 
               <Divider style={{ margin: '8px 0' }} />
@@ -422,16 +423,17 @@ export const ParseResultCorrectionCard: React.FC<ParseResultCorrectionCardProps>
                 </Button>
               </Space>
               {(documentStructure.teachingFocus || []).map((item, index) => (
-                <Space key={`focus-${index}`} align="start" style={{ width: '100%' }}>
+                <div key={`focus-${index}`} style={{ display: 'flex', gap: 8, width: '100%' }}>
                   <Input
                     value={item}
                     onChange={(event) => updateStringList('teachingFocus', index, event.target.value)}
                     maxLength={200}
+                    style={{ flex: 1, minWidth: 0 }}
                   />
-                  <Button danger onClick={() => removeStringListItem('teachingFocus', index)}>
+                  <Button danger style={{ flexShrink: 0 }} onClick={() => removeStringListItem('teachingFocus', index)}>
                     Remove
                   </Button>
-                </Space>
+                </div>
               ))}
             </Space>
           </Card>
@@ -569,17 +571,18 @@ export const ParseResultCorrectionCard: React.FC<ParseResultCorrectionCardProps>
                 </Button>
               </Space>
               {teachingArtifacts.cases.map((item, index) => (
-                <Space key={`case-${index}`} align="start" style={{ width: '100%' }}>
+                <div key={`case-${index}`} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, width: '100%' }}>
                   <TextArea
                     value={item}
                     onChange={(event) => updateCase(index, event.target.value)}
                     autoSize={{ minRows: 2, maxRows: 4 }}
                     maxLength={2000}
+                    style={{ flex: 1, minWidth: 0 }}
                   />
-                  <Button danger onClick={() => removeCase(index)}>
+                  <Button danger style={{ flexShrink: 0 }} onClick={() => removeCase(index)}>
                     Remove
                   </Button>
-                </Space>
+                </div>
               ))}
 
               <Divider style={{ margin: '8px 0' }} />
@@ -607,16 +610,17 @@ export const ParseResultCorrectionCard: React.FC<ParseResultCorrectionCardProps>
                     />
                     <Text type="secondary">Scoring Points</Text>
                     {(question.scoringPoints || []).map((point, pointIndex) => (
-                      <Space key={`score-${index}-${pointIndex}`} align="start" style={{ width: '100%' }}>
+                      <div key={`score-${index}-${pointIndex}`} style={{ display: 'flex', gap: 8, width: '100%' }}>
                         <Input
                           value={point}
                           onChange={(event) => updateScoringPoint(index, pointIndex, event.target.value)}
                           maxLength={2000}
+                          style={{ flex: 1, minWidth: 0 }}
                         />
-                        <Button danger onClick={() => removeScoringPoint(index, pointIndex)}>
+                        <Button danger style={{ flexShrink: 0 }} onClick={() => removeScoringPoint(index, pointIndex)}>
                           Remove
                         </Button>
-                      </Space>
+                      </div>
                     ))}
                     <Button size="small" onClick={() => addScoringPoint(index)}>
                       Add Scoring Point

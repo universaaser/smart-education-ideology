@@ -26,11 +26,12 @@ import {
   InboxOutlined,
   PlayCircleOutlined,
   ReloadOutlined,
-  RobotOutlined,
 } from '@ant-design/icons';
 import {
   chatApi,
+  CourseChapterInfo,
   CourseInfo,
+  courseApi,
   dashboardApi,
   MaterialVersionItemInfo,
   materialApi,
@@ -41,7 +42,6 @@ import {
   SelectionExplainResponse,
   TeachingMaterialDraftInfo,
   TeachingMaterialSaveRequest,
-  TeachingMaterialTraceInfo,
   TeachingMaterialViewInfo,
   TeachingQuestionInfo,
   UploadTaskInfo,
@@ -85,12 +85,9 @@ export const ResourceUpload: React.FC<ResourceUploadProps> = ({
   const [courses, setCourses] = useState<CourseInfo[]>([]);
   const [coursesLoading, setCoursesLoading] = useState(false);
   const [selectedCourseId, setSelectedCourseId] = useState<number | undefined>(undefined);
-  const [traceRows, setTraceRows] = useState<TeachingMaterialTraceInfo[]>([]);
-  const [traceTotal, setTraceTotal] = useState(0);
-  const [traceLoading, setTraceLoading] = useState(false);
-  const [traceKnowledgeFilter, setTraceKnowledgeFilter] = useState('');
-  const [traceIdeologyFilter, setTraceIdeologyFilter] = useState('');
-  const [traceUseCourseFilter, setTraceUseCourseFilter] = useState(false);
+  const [chapters, setChapters] = useState<CourseChapterInfo[]>([]);
+  const [chaptersLoading, setChaptersLoading] = useState(false);
+  const [selectedChapterId, setSelectedChapterId] = useState<number | undefined>(undefined);
   const [rollbackTip, setRollbackTip] = useState('');
   const [selectionExplainLoading, setSelectionExplainLoading] = useState(false);
   const [selectionExplainResult, setSelectionExplainResult] = useState<SelectionExplainResponse | null>(null);
@@ -206,6 +203,34 @@ export const ResourceUpload: React.FC<ResourceUploadProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId]);
 
+  useEffect(() => {
+    if (!selectedCourseId) {
+      setChapters([]);
+      setSelectedChapterId(undefined);
+      return;
+    }
+
+    const loadChapters = async () => {
+      setChaptersLoading(true);
+      try {
+        const courseChapters = await courseApi.getChapters(selectedCourseId);
+        if (!isUnmountedRef.current) {
+          setChapters(courseChapters);
+        }
+      } catch {
+        if (!isUnmountedRef.current) {
+          setChapters([]);
+        }
+      } finally {
+        if (!isUnmountedRef.current) {
+          setChaptersLoading(false);
+        }
+      }
+    };
+
+    loadChapters();
+  }, [selectedCourseId]);
+
   /**
    * 页面底部自动滚动：每次 liveLog 增量写入后把日志框滚到底部。
    */
@@ -221,6 +246,7 @@ export const ResourceUpload: React.FC<ResourceUploadProps> = ({
     parseTaskId: material.parseTaskId,
     userId: material.userId,
     courseId: material.courseId,
+    chapterId: material.chapterId ?? null,
     title: material.title || '',
     lectureNotes: material.lectureNotes || '',
     cases: material.cases || [],
@@ -261,12 +287,6 @@ export const ResourceUpload: React.FC<ResourceUploadProps> = ({
   });
 
   const resetTransientPanels = () => {
-    setTraceRows([]);
-    setTraceTotal(0);
-    setTraceLoading(false);
-    setTraceKnowledgeFilter('');
-    setTraceIdeologyFilter('');
-    setTraceUseCourseFilter(false);
     setRollbackTip('');
     setSelectionExplainLoading(false);
     setSelectionExplainResult(null);
@@ -304,6 +324,7 @@ export const ResourceUpload: React.FC<ResourceUploadProps> = ({
     setRetryingTask(false);
     setCorrectionSyncNotice('');
     setSelectedCourseId(undefined);
+    setSelectedChapterId(undefined);
     setLiveLog('');
     liveLogCursorRef.current = 0;
     resetTransientPanels();
@@ -378,44 +399,6 @@ export const ResourceUpload: React.FC<ResourceUploadProps> = ({
     }
   };
 
-  const loadTraceRows = async (
-    taskId: number,
-    materialId?: number | null,
-    page = 1,
-  ) => {
-    setTraceLoading(true);
-    try {
-      const courseIdFilter = traceUseCourseFilter && selectedCourseId ? selectedCourseId : undefined;
-      const response = materialId
-        ? await materialApi.getTraces(materialId, {
-            knowledgePoint: traceKnowledgeFilter.trim() || undefined,
-            ideologyElement: traceIdeologyFilter.trim() || undefined,
-            page,
-            size: 20,
-          })
-        : await uploadApi.getTaskTraces(taskId, {
-            courseId: courseIdFilter,
-            knowledgePoint: traceKnowledgeFilter.trim() || undefined,
-            ideologyElement: traceIdeologyFilter.trim() || undefined,
-            page,
-            size: 20,
-          });
-
-      if (!isUnmountedRef.current) {
-        setTraceRows(response.records || []);
-        setTraceTotal(response.total || 0);
-      }
-    } catch {
-      if (!isUnmountedRef.current) {
-        message.error('Failed to load trace rows');
-      }
-    } finally {
-      if (!isUnmountedRef.current) {
-        setTraceLoading(false);
-      }
-    }
-  };
-
   const loadSelectionExplainHistory = async (
     materialId?: number | null,
     courseId?: number | null,
@@ -451,14 +434,10 @@ export const ResourceUpload: React.FC<ResourceUploadProps> = ({
   };
 
   const refreshEditorPanels = async (
-    taskId: number,
     materialId?: number | null,
     courseId?: number | null,
   ) => {
-    await Promise.all([
-      loadTraceRows(taskId, materialId),
-      loadSelectionExplainHistory(materialId, courseId),
-    ]);
+    await loadSelectionExplainHistory(materialId, courseId);
   };
 
   const loadMaterialIntoEditor = async (
@@ -470,9 +449,10 @@ export const ResourceUpload: React.FC<ResourceUploadProps> = ({
     if (!isUnmountedRef.current) {
       setEditorDraft(draft);
       setSelectedCourseId(material.courseId ?? undefined);
+      setSelectedChapterId(material.chapterId ?? undefined);
       setRollbackTip('');
     }
-    await refreshEditorPanels(material.parseTaskId, material.materialId, material.courseId);
+    await refreshEditorPanels(material.materialId, material.courseId);
     if (options?.successMessage && !isUnmountedRef.current) {
       message.success(`Loaded version ${material.versionNo}`);
     }
@@ -500,10 +480,9 @@ export const ResourceUpload: React.FC<ResourceUploadProps> = ({
       setSelectedLectureText('');
       setRollbackTip('');
       setCorrectionSyncNotice('');
-      setTraceRows([]);
-      setTraceTotal(0);
       setEditorDraft(draft);
       setSelectedCourseId(draft.courseId ?? taskInfo.courseId ?? undefined);
+      setSelectedChapterId(draft.chapterId ?? undefined);
 
       let activeDraft = draft;
       const versions = await loadMaterialVersions(taskInfo.taskId);
@@ -514,7 +493,7 @@ export const ResourceUpload: React.FC<ResourceUploadProps> = ({
         }
         activeDraft = await loadMaterialIntoEditor(preferredMaterialId);
       } else {
-        await refreshEditorPanels(taskInfo.taskId, draft.materialId, draft.courseId);
+        await refreshEditorPanels(draft.materialId, draft.courseId);
       }
       await loadCorrectionDraft(taskInfo.taskId);
 
@@ -894,6 +873,7 @@ export const ResourceUpload: React.FC<ResourceUploadProps> = ({
   };
 
   const buildSavePayload = (draft: TeachingMaterialDraftInfo): TeachingMaterialSaveRequest => ({
+    chapterId: selectedChapterId ?? null,
     title: draft.title || '',
     lectureNotes: draft.lectureNotes || '',
     cases: (draft.cases || []).map((item) => item.trim()).filter(Boolean),
@@ -928,7 +908,7 @@ export const ResourceUpload: React.FC<ResourceUploadProps> = ({
         if (!isUnmountedRef.current) {
           setEditorDraft(refreshedEditorDraft);
           setSelectedCourseId(refreshedEditorDraft.courseId ?? taskResult.courseId ?? undefined);
-          await refreshEditorPanels(taskResult.taskId, refreshedEditorDraft.materialId, refreshedEditorDraft.courseId);
+          await refreshEditorPanels(refreshedEditorDraft.materialId, refreshedEditorDraft.courseId);
           setCorrectionSyncNotice(
             'Correction saved. Teaching editor baseline was refreshed because no material snapshot exists yet.',
           );
@@ -994,7 +974,8 @@ export const ResourceUpload: React.FC<ResourceUploadProps> = ({
       const saved = await uploadApi.saveEditorDraft(taskResult.taskId, buildSavePayload(editorDraft));
       setEditorDraft(saved);
       setSelectedCourseId(saved.courseId ?? taskResult.courseId ?? undefined);
-      await refreshEditorPanels(taskResult.taskId, saved.materialId, saved.courseId);
+      setSelectedChapterId(saved.chapterId ?? undefined);
+      await refreshEditorPanels(saved.materialId, saved.courseId);
       message.success('Draft saved');
     } catch (err: unknown) {
       message.error(err instanceof Error ? err.message : 'Failed to save draft');
@@ -1016,6 +997,7 @@ export const ResourceUpload: React.FC<ResourceUploadProps> = ({
               ...previous,
               materialId: saved.materialId,
               courseId: saved.courseId,
+              chapterId: saved.chapterId ?? null,
               versionNo: saved.versionNo,
               status: saved.status,
               updatedAt: saved.updatedAt,
@@ -1024,8 +1006,9 @@ export const ResourceUpload: React.FC<ResourceUploadProps> = ({
           : previous,
       );
       setSelectedCourseId(saved.courseId ?? taskResult.courseId ?? undefined);
+      setSelectedChapterId(saved.chapterId ?? undefined);
       await loadMaterialVersions(taskResult.taskId);
-      await refreshEditorPanels(taskResult.taskId, saved.materialId, saved.courseId);
+      await refreshEditorPanels(saved.materialId, saved.courseId);
       setRollbackTip('');
       message.success(`Version ${saved.versionNo} saved`);
     } catch (err: unknown) {
@@ -1073,8 +1056,9 @@ export const ResourceUpload: React.FC<ResourceUploadProps> = ({
       const rolledBack = await uploadApi.rollbackMaterialVersion(taskResult.taskId, materialId);
       setEditorDraft(rolledBack);
       setSelectedCourseId(rolledBack.courseId ?? taskResult.courseId ?? undefined);
+      setSelectedChapterId(rolledBack.chapterId ?? undefined);
       await loadMaterialVersions(taskResult.taskId);
-      await refreshEditorPanels(taskResult.taskId, rolledBack.materialId, rolledBack.courseId);
+      await refreshEditorPanels(rolledBack.materialId, rolledBack.courseId);
       const rollbackTime = new Date().toLocaleString();
       setRollbackTip(
         `Rolled back from version v${versionNo} at ${rollbackTime}. Unsaved until you click Save Draft or Save Version.`,
@@ -1085,13 +1069,6 @@ export const ResourceUpload: React.FC<ResourceUploadProps> = ({
     } finally {
       setEditorLoading(false);
     }
-  };
-
-  const handleSearchTraces = async () => {
-    if (!taskResult?.taskId) {
-      return;
-    }
-    await loadTraceRows(taskResult.taskId, editorDraft?.materialId || null);
   };
 
   const getSelectedText = () => {
@@ -1358,7 +1335,10 @@ export const ResourceUpload: React.FC<ResourceUploadProps> = ({
               loading={coursesLoading}
               placeholder="Select course for this upload task"
               value={selectedCourseId}
-              onChange={(value) => setSelectedCourseId(value)}
+              onChange={(value) => {
+                setSelectedCourseId(value);
+                setSelectedChapterId(undefined);
+              }}
               style={{ width: '100%' }}
             >
               {courses.map((course) => (
@@ -1367,8 +1347,23 @@ export const ResourceUpload: React.FC<ResourceUploadProps> = ({
                 </Option>
               ))}
             </Select>
+            <Select
+              allowClear
+              disabled={!selectedCourseId}
+              loading={chaptersLoading}
+              placeholder="Select chapter for saved teaching materials"
+              value={selectedChapterId}
+              onChange={(value) => setSelectedChapterId(value)}
+              style={{ width: '100%' }}
+            >
+              {chapters.map((chapter) => (
+                <Option key={chapter.id} value={chapter.id}>
+                  {chapter.title}
+                </Option>
+              ))}
+            </Select>
             <Text type="secondary" style={{ fontSize: 12 }}>
-              Selected course will be attached to the parse task, saved material versions, and trace queries.
+              Selected course is attached to the parse task; selected chapter is attached to saved material versions.
             </Text>
           </Space>
         </Card>
@@ -1535,30 +1530,6 @@ export const ResourceUpload: React.FC<ResourceUploadProps> = ({
               )
             )}
 
-            {taskResult.aiAnalysis && (
-              <Card
-                title={(
-                  <Space size={8}>
-                    <RobotOutlined style={{ color: '#ef4444' }} />
-                    <span>AI Analysis</span>
-                  </Space>
-                )}
-                bordered={false}
-                style={{
-                  borderRadius: 12,
-                  boxShadow: '0 1px 2px rgba(15, 23, 42, 0.04)',
-                }}
-                headStyle={{
-                  background: 'linear-gradient(90deg, #fff1f0 0%, #ffffff 100%)',
-                  borderBottom: '1px solid #fee2e2',
-                  borderRadius: '12px 12px 0 0',
-                }}
-                bodyStyle={{ padding: '18px 22px' }}
-              >
-                <MarkdownView content={taskResult.aiAnalysis} />
-              </Card>
-            )}
-
             <ParseResultCorrectionCard
               draft={correctionDraft}
               loading={correctionLoading}
@@ -1583,13 +1554,6 @@ export const ResourceUpload: React.FC<ResourceUploadProps> = ({
               selectionExplainResult={selectionExplainResult}
               selectionExplainHistory={selectionExplainHistory}
               selectionHistoryLoading={selectionHistoryLoading}
-              traceKnowledgeFilter={traceKnowledgeFilter}
-              traceIdeologyFilter={traceIdeologyFilter}
-              traceUseCourseFilter={traceUseCourseFilter}
-              selectedCourseId={selectedCourseId}
-              traceLoading={traceLoading}
-              traceTotal={traceTotal}
-              traceRows={traceRows}
               onSaveDraft={handleSaveDraft}
               onPublishVersion={handlePublishVersion}
               onExportMarkdown={handleExportMarkdown}
@@ -1618,10 +1582,6 @@ export const ResourceUpload: React.FC<ResourceUploadProps> = ({
               onUpdateScoringPoint={updateScoringPoint}
               onAddScoringPoint={addScoringPoint}
               onRemoveScoringPoint={removeScoringPoint}
-              onChangeTraceKnowledgeFilter={setTraceKnowledgeFilter}
-              onChangeTraceIdeologyFilter={setTraceIdeologyFilter}
-              onToggleTraceUseCourse={() => setTraceUseCourseFilter((previous) => !previous)}
-              onSearchTraces={handleSearchTraces}
             />
           </Space>
         )}

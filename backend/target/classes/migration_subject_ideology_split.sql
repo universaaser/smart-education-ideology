@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS ideology_knowledge (
     sub_title VARCHAR(255) COMMENT 'Secondary title',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT 'Created time',
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT 'Updated time',
+    deleted TINYINT NOT NULL DEFAULT 0 COMMENT 'Soft delete flag',
     UNIQUE KEY uk_ideology_knowledge_name (name)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Fixed ideology knowledge dictionary';
 
@@ -38,9 +39,42 @@ CREATE TABLE IF NOT EXISTS subject_knowledge (
     creator_id BIGINT COMMENT 'Creator id',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT 'Created time',
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT 'Updated time',
+    deleted TINYINT NOT NULL DEFAULT 0 COMMENT 'Soft delete flag',
     INDEX idx_subject_knowledge_name (name),
     INDEX idx_subject_knowledge_subject (subject)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Runtime subject knowledge table';
+
+SET @column_exists := (
+    SELECT COUNT(*)
+    FROM information_schema.columns
+    WHERE table_schema = DATABASE()
+      AND table_name = 'ideology_knowledge'
+      AND column_name = 'deleted'
+);
+SET @sql := IF(
+    @column_exists = 0,
+    'ALTER TABLE ideology_knowledge ADD COLUMN deleted TINYINT NOT NULL DEFAULT 0 COMMENT ''Soft delete flag''',
+    'SELECT 1'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @column_exists := (
+    SELECT COUNT(*)
+    FROM information_schema.columns
+    WHERE table_schema = DATABASE()
+      AND table_name = 'subject_knowledge'
+      AND column_name = 'deleted'
+);
+SET @sql := IF(
+    @column_exists = 0,
+    'ALTER TABLE subject_knowledge ADD COLUMN deleted TINYINT NOT NULL DEFAULT 0 COMMENT ''Soft delete flag''',
+    'SELECT 1'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
 
 CREATE TABLE IF NOT EXISTS subject_ideology_matches (
     id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT 'Primary key',

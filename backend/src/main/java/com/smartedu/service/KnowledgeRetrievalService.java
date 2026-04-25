@@ -213,6 +213,7 @@ public class KnowledgeRetrievalService {
 
         LambdaQueryWrapper<SubjectIdeologyMatch> matchWrapper = new LambdaQueryWrapper<>();
         matchWrapper.eq(SubjectIdeologyMatch::getSubjectKnowledgeId, subjectKnowledge.getId())
+                .eq(SubjectIdeologyMatch::getReviewStatus, "APPROVED")
                 .orderByDesc(SubjectIdeologyMatch::getIsPrimary)
                 .orderByDesc(SubjectIdeologyMatch::getMatchScore)
                 .last("LIMIT 1");

@@ -6,6 +6,7 @@ import com.smartedu.dto.DocumentStructureDto;
 import com.smartedu.dto.ParseTaskCorrectionDraftDto;
 import com.smartedu.dto.PipelineResultDto;
 import com.smartedu.entity.ParseTask;
+import com.smartedu.entity.TeachingMaterial;
 import com.smartedu.mapper.ParseTaskCorrectionMapper;
 import com.smartedu.mapper.ParseTaskIdeologyMatchMapper;
 import com.smartedu.mapper.ParseTaskKnowledgePointMapper;
@@ -35,6 +36,7 @@ import java.util.List;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -58,9 +60,11 @@ class UploadControllerTest {
         DocumentStructureDto storedStructure = new DocumentStructureDto();
         storedStructure.setTitle("IoT Teaching Outline");
         storedStructure.setParseMode("MINERU");
+        storedStructure.setRawMarkdown("# IoT Teaching Outline\n\nMarkdown body");
         PipelineResultDto storedPipeline = new PipelineResultDto();
         storedPipeline.setDocumentStructure(storedStructure);
         storedPipeline.setSchemaVersion("v1");
+        task.setParsedContent(new ObjectMapper().writeValueAsString(storedStructure));
         task.setAiAnalysis(new ObjectMapper().writeValueAsString(storedPipeline));
 
         ParseTaskMapper parseTaskMapper = buildMapperStub(task);
@@ -86,6 +90,19 @@ class UploadControllerTest {
                             if ("selectList".equals(method.getName())) {
                                 return new ArrayList<>();
                             }
+                            if ("insert".equals(method.getName()) && args[0] instanceof TeachingMaterial material) {
+                                material.setId(1L);
+                                return 1;
+                            }
+                            if ("updateById".equals(method.getName())) {
+                                return 1;
+                            }
+                            if (method.getReturnType().equals(boolean.class)) {
+                                return false;
+                            }
+                            if (method.getReturnType().isPrimitive()) {
+                                return 0;
+                            }
                             return null;
                         }
                 ),
@@ -105,7 +122,21 @@ class UploadControllerTest {
                 (TeachingMaterialTraceMapper) Proxy.newProxyInstance(
                         TeachingMaterialTraceMapper.class.getClassLoader(),
                         new Class[]{TeachingMaterialTraceMapper.class},
-                        (proxy, method, args) -> null
+                        (proxy, method, args) -> {
+                            if ("selectCount".equals(method.getName())) {
+                                return 0L;
+                            }
+                            if ("insert".equals(method.getName()) || "delete".equals(method.getName())) {
+                                return 1;
+                            }
+                            if (method.getReturnType().equals(boolean.class)) {
+                                return false;
+                            }
+                            if (method.getReturnType().isPrimitive()) {
+                                return 0;
+                            }
+                            return null;
+                        }
                 ),
                 new ObjectMapper()
         );
@@ -151,6 +182,50 @@ class UploadControllerTest {
     }
 
     @Test
+    void shouldSaveEditorDraftWhenBodyIsEmpty() throws Exception {
+        mockMvc.perform(put("/api/upload/tasks/1/editor-draft")
+                        .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200))
+                .andExpect(jsonPath("$.data.title").value("iot-outline.docx"));
+    }
+
+    @Test
+    void shouldSavePublishedMaterialWhenBodyIsEmpty() throws Exception {
+        mockMvc.perform(post("/api/upload/tasks/1/materials")
+                        .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                        .content("{}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200))
+                .andExpect(jsonPath("$.data.title").value("iot-outline.docx"));
+    }
+
+    @Test
+    void shouldReturnBadRequestWhenPublishedMaterialValidationFails() throws Exception {
+        String body = """
+                {
+                  "title": "Invalid",
+                  "questions": [
+                    {
+                      "questionType": "SINGLE_CHOICE",
+                      "stem": "Choice question",
+                      "referenceAnswer": "A",
+                      "scoringPoints": ["Point 1"]
+                    }
+                  ]
+                }
+                """;
+
+        mockMvc.perform(post("/api/upload/tasks/1/materials")
+                        .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(400))
+                .andExpect(jsonPath("$.message").value("Choice assessment questions require options"));
+    }
+
+    @Test
     void shouldReturnCorrectionDraftWhenTaskExists() throws Exception {
         mockMvc.perform(get("/api/upload/tasks/1/correction-draft"))
                 .andExpect(status().isOk())
@@ -184,6 +259,14 @@ class UploadControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.code").value(400))
                 .andExpect(jsonPath("$.message").value("User id cannot be empty"));
+    }
+
+    @Test
+    void shouldReturnMarkdownContentFromStoredParsedContentJson() throws Exception {
+        mockMvc.perform(get("/api/upload/tasks/1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200))
+                .andExpect(jsonPath("$.data.parsedContent").value("# IoT Teaching Outline\n\nMarkdown body"));
     }
 
     @Test

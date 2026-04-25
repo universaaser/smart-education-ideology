@@ -7,7 +7,9 @@ import com.smartedu.crawler.model.CrawledArticleRaw;
 import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Method;
+import java.time.LocalDateTime;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -19,7 +21,7 @@ class ResourceCrawlServiceTest {
 
     @Test
     void shouldKeepEmptyTagsWhenFallbackProcessIsUsed() throws Exception {
-        ResourceCrawlService service = new ResourceCrawlService(List.of(), null, null, null, new ObjectMapper());
+        ResourceCrawlService service = new ResourceCrawlService(List.of(), null, null, null, new ObjectMapper(), null);
         CrawledArticleRaw raw = new CrawledArticleRaw(
                 "People Daily",
                 "Industrial Sensor Network",
@@ -39,7 +41,7 @@ class ResourceCrawlServiceTest {
     @Test
     void shouldReturnEmptyArrayWhenAiTagsAreUnknown() throws Exception {
         ObjectMapper objectMapper = new ObjectMapper();
-        ResourceCrawlService service = new ResourceCrawlService(List.of(), null, null, null, objectMapper);
+        ResourceCrawlService service = new ResourceCrawlService(List.of(), null, null, null, objectMapper, null);
         JsonNode tagNode = objectMapper.readTree("[\"Unknown Tag\"]");
 
         String tagsJson = invokeBuildTagsJson(service, tagNode);
@@ -50,7 +52,7 @@ class ResourceCrawlServiceTest {
     @Test
     void shouldCanonicalizeSupportedIdeologyTags() throws Exception {
         ObjectMapper objectMapper = new ObjectMapper();
-        ResourceCrawlService service = new ResourceCrawlService(List.of(), null, null, null, objectMapper);
+        ResourceCrawlService service = new ResourceCrawlService(List.of(), null, null, null, objectMapper, null);
         JsonNode tagNode = objectMapper.readTree("[\"" + TAG_CRAFTSMANSHIP + "\"]");
 
         String tagsJson = invokeBuildTagsJson(service, tagNode);
@@ -61,12 +63,22 @@ class ResourceCrawlServiceTest {
     @Test
     void shouldReturnEmptyArrayWhenAiTagsAreEmptyArray() throws Exception {
         ObjectMapper objectMapper = new ObjectMapper();
-        ResourceCrawlService service = new ResourceCrawlService(List.of(), null, null, null, objectMapper);
+        ResourceCrawlService service = new ResourceCrawlService(List.of(), null, null, null, objectMapper, null);
         JsonNode tagNode = objectMapper.readTree("[]");
 
         String tagsJson = invokeBuildTagsJson(service, tagNode);
 
         assertEquals("[]", tagsJson);
+    }
+
+    @Test
+    void shouldRecordFailedRunWhenSelectedSourceHasNoMatchingRule() throws Exception {
+        StubCrawlSourceService crawlSourceService = new StubCrawlSourceService();
+        ResourceCrawlService service = new ResourceCrawlService(List.of(), null, null, null, new ObjectMapper(), crawlSourceService);
+
+        invokeRunManualCrawl(service, 7L);
+
+        assertTrue(crawlSourceService.emptyRunRecorded.get());
     }
 
     private CrawledArticleProcessed invokeFallbackProcess(ResourceCrawlService service, CrawledArticleRaw raw) throws Exception {
@@ -79,5 +91,36 @@ class ResourceCrawlServiceTest {
         Method method = ResourceCrawlService.class.getDeclaredMethod("buildTagsJson", JsonNode.class);
         method.setAccessible(true);
         return (String) method.invoke(service, tagNode);
+    }
+
+    private void invokeRunManualCrawl(ResourceCrawlService service, Long sourceId) throws Exception {
+        Method method = ResourceCrawlService.class.getDeclaredMethod("runManualCrawl", Long.class);
+        method.setAccessible(true);
+        method.invoke(service, sourceId);
+    }
+
+    private static class StubCrawlSourceService extends CrawlSourceService {
+
+        private final AtomicBoolean emptyRunRecorded = new AtomicBoolean(false);
+
+        StubCrawlSourceService() {
+            super(null, null, null);
+        }
+
+        @Override
+        public List<com.smartedu.crawler.rule.CrawlSiteRule> filterEnabledRules(
+                List<com.smartedu.crawler.rule.CrawlSiteRule> rules,
+                Long sourceId) {
+            return List.of();
+        }
+
+        @Override
+        public void recordEmptyRun(Long sourceId, LocalDateTime startedAt, LocalDateTime finishedAt, String status, String errorSummary) {
+            if (sourceId == 7L
+                    && "FAILED".equals(status)
+                    && errorSummary.contains("No enabled crawler rule matched")) {
+                emptyRunRecorded.set(true);
+            }
+        }
     }
 }

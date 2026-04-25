@@ -23,6 +23,8 @@ public class CourseTeachingMaterialGroupDto {
 
     private Long courseId;
 
+    private Long chapterId;
+
     private String displayTitle;
 
     private String sourceFileName;

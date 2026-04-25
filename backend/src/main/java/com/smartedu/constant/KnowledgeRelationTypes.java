@@ -59,4 +59,12 @@ public final class KnowledgeRelationTypes {
     public static Set<String> supportedTypes() {
         return Set.of(TECH_BASE, VALUE_SHOW, THEORY_SUPPORT, PRACTICE_APPLY);
     }
+
+    public static boolean canNormalize(String relationType) {
+        if (relationType == null || relationType.isBlank()) {
+            return false;
+        }
+        String trimmed = relationType.trim();
+        return LEGACY_MAPPING.containsKey(trimmed) || supportedTypes().contains(trimmed);
+    }
 }

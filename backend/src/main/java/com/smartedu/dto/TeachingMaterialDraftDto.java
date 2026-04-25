@@ -24,6 +24,8 @@ public class TeachingMaterialDraftDto {
 
     private Long courseId;
 
+    private Long chapterId;
+
     private String title;
 
     private String lectureNotes;
