@@ -16,6 +16,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.stereotype.Component;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 /**
@@ -61,6 +62,9 @@ public class ProjectionBackfillService implements CommandLineRunner {
                 }
                 Long taskId = task.getId();
                 Long courseId = task.getCourseId();
+                LocalDateTime createdAt = task.getCreatedAt() != null
+                        ? task.getCreatedAt()
+                        : LocalDateTime.now();
                 String version = result.getSchemaVersion();
                 if (version == null || version.isBlank()) {
                     version = "v1";
@@ -76,6 +80,7 @@ public class ProjectionBackfillService implements CommandLineRunner {
                         point.setChapter(dto.getChapter());
                         point.setEvidenceSnippet(dto.getEvidenceSnippet());
                         point.setPipelineVersion(version);
+                        point.setCreatedAt(createdAt);
                         parseTaskKnowledgePointMapper.insert(point);
                         knowledgePointCount++;
                     }
@@ -89,6 +94,7 @@ public class ProjectionBackfillService implements CommandLineRunner {
                         match.setIdeologyElement(dto.getIdeologyElement());
                         match.setMatchReason(dto.getMatchReason());
                         match.setPipelineVersion(version);
+                        match.setCreatedAt(createdAt);
                         parseTaskIdeologyMatchMapper.insert(match);
                         ideologyMatchCount++;
                     }
