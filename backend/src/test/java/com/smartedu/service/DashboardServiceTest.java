@@ -24,6 +24,7 @@ import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Proxy;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
@@ -98,6 +99,10 @@ class DashboardServiceTest {
                         sqlSegment.set(readSqlSegment(args[0]));
                         return selectList;
                     }
+                    if ("selectMaps".equals(method.getName())) {
+                        sqlSegment.set(readSqlSegment(args[0]));
+                        return List.of();
+                    }
                     return defaultValue(method.getReturnType());
                 });
     }
@@ -138,5 +143,51 @@ class DashboardServiceTest {
             return 0D;
         }
         return null;
+    }
+
+    @Test
+    void shouldPushActivityTrendAggregationDownToDatabase() {
+        initTables();
+        AtomicReference<String> eventSql = new AtomicReference<>("");
+        LocalDate today = LocalDate.now();
+        // 伪造「数据库聚合后」返回的两行:今天 3 条、前天 5 条
+        List<Map<String, Object>> dbRows = List.of(
+                Map.<String, Object>of("day", today.toString(), "value", 3L),
+                Map.<String, Object>of("day", today.minusDays(2).toString(), "value", 5L));
+
+        StudentActivityEventMapper eventMapper = (StudentActivityEventMapper) Proxy.newProxyInstance(
+                StudentActivityEventMapper.class.getClassLoader(),
+                new Class<?>[]{StudentActivityEventMapper.class},
+                (proxy, method, args) -> {
+                    if ("selectMaps".equals(method.getName())) {
+                        eventSql.set(readSqlSegment(args[0]));
+                        return dbRows;
+                    }
+                    if ("selectList".equals(method.getName())) {
+                        throw new AssertionError("不应再全量读取事件表(selectList),聚合应下推数据库");
+                    }
+                    return defaultValue(method.getReturnType());
+                });
+
+        DashboardService service = new DashboardService(
+                mapper(CourseMapper.class),
+                mapper(SubjectKnowledgeMapper.class),
+                mapper(SubjectIdeologyMatchMapper.class),
+                mapper(StudentActivityMapper.class),
+                mapper(SystemActivityMapper.class),
+                mapper(StudentAlertRecordMapper.class),
+                mapper(ResourceMapper.class),
+                mapper(ParseTaskMapper.class, List.of(), 0L, new AtomicReference<>("")),
+                mapper(TeachingMaterialMapper.class),
+                eventMapper);
+
+        Map<String, Object> overview = service.getOverview(8L);
+
+        assertTrue(eventSql.get().contains("group by"), "SQL 应包含 GROUP BY,聚合在数据库完成");
+        List<?> trend = (List<?>) overview.get("activityTrend");
+        assertEquals(7, trend.size(), "返回结构不变:仍为最近 7 天");
+        Map<?, ?> todayPoint = (Map<?, ?>) trend.get(6);
+        assertEquals(today.toString(), todayPoint.get("day"));
+        assertEquals(3L, todayPoint.get("value"), "今天的计数应来自数据库聚合结果");
     }
 }
