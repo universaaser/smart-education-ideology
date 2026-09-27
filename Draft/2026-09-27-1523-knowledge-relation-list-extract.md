@@ -1,4 +1,4 @@
-# Knowledge Relation List Extract
+# 知识图谱关系列表组件拆分
 
 ## 结论
 
