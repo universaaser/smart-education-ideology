@@ -18,4 +18,4 @@
 
 ## 接手提示
 
-Issue：`https://github.com/universaaser/smart-education-ideology/issues/7`。在工作分支 `codex/liyang-knowledge-graph-relations` 上提交 PR，附上述验证记录并请组员 review；不要把模拟回归写成真实服务验收。
+Issue：`https://github.com/universaaser/smart-education-ideology/issues/7`；PR：`https://github.com/universaaser/smart-education-ideology/pull/8`。工作分支为 `codex/liyang-knowledge-graph-relations`，已请求组员 `a3321919` review。合并前仍需对方审查和真实后端联调；不要把模拟回归写成真实服务验收。
