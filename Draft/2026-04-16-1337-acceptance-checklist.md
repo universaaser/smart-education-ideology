@@ -30,7 +30,7 @@
 - [x] 知识图谱节点、关系查询和前端可视化展示。
 - [x] 节点位置拖动与保存。
 - [x] Excel 模板下载与批量导入基础能力。
-- [~] 节点关系创建、删除与基础展示体验。已补图谱节点详情关系列表、入边/出边展示、关系类型选择与编辑、重复关系提示、单条关系删除和最近一次关系变更撤销；新增节点入口已支持可选尺寸、默认避让布局，图谱连线文案已移除并展示完整节点标题；2026-04-25 已让资源/新闻自动入图节点复用避让布局，并将自动匹配思政关系设为 `APPROVED` 以便生成即连线。仍需节点字段编辑增强、真实浏览器手动验收和更完整冲突处理。
+- [~] 节点关系创建、删除与基础展示体验。已补图谱节点详情关系列表、入边/出边展示、关系类型选择与编辑、重复关系提示、单条关系删除和最近一次关系变更撤销；新增节点入口已支持可选尺寸、默认避让布局，图谱连线文案已移除并展示完整节点标题；2026-04-25 已让资源/新闻自动入图节点复用避让布局，并将自动匹配思政关系设为 `APPROVED` 以便生成即连线。2026-09-27 将现有关系列表局部拆为独立组件，功能和验收状态不变。仍需节点字段编辑增强、真实后端浏览器验收和更完整冲突处理。
 - [~] 基于图谱的学习路径推荐。当前主要依赖图关系和简单优先级，未结合真实学习画像。
 - [~] 图谱增量更新、导入历史、冲突处理、回滚或撤销机制。已新增 `knowledge_change_logs` 记录关系编辑/删除 before/after，并支持最近一次关系变更撤销；导入历史、节点级回滚和多人冲突处理仍未完成。
 
@@ -111,6 +111,7 @@
 - 如果发现 `/Draft/毕设.md`、本清单和用户当前要求冲突，以用户当前明确要求优先，并在维护记录中说明取舍原因。
 
 ## 维护记录
+- `2026-09-27 15:23` | `knowledge-relation-list-extract` | 将 `views/KnowledgeGraph.tsx` 的节点详情关系列表提取为 `components/KnowledgeRelationList.tsx`，保持原有入边/出边、真实关系编辑/删除、合成关系只读和关联节点切换行为；未调整接口、数据或验收状态。验证：TypeScript 类型检查、`npm run build` 通过；浏览器使用模拟图谱和 API 完成教师及学生路径回归。仍需另一名组员 review、真实后端联调；本地未启动后端，其他接口报错不代表本次组件异常。
 - `2026-04-25 17:30` | `teacher-dashboard-overview` | 完成 `2026-04-25-1633-prd-demo-richness-plan` 的 P0-2 最小闭环：新增 `/api/dashboard/overview`，聚合待处理预警、待审核资源、待审核匹配、失败解析任务、最近解析任务、材料发布统计和近 7 日学习事件趋势；教师 Dashboard 第一屏新增可跳转待办卡片、材料发布卡片和最近解析任务列表，并修正 Open Alerts 跳转到 Alerts。关键文件：`backend/src/main/java/com/smartedu/service/DashboardService.java`、`backend/src/main/java/com/smartedu/controller/DashboardController.java`、`views/Dashboard.tsx`、`services/api.ts`、`backend/src/test/java/com/smartedu/service/DashboardServiceTest.java`、`backend/src/test/java/com/smartedu/controller/DashboardControllerTest.java`。仍需：真实浏览器手动验收和更细教师归属过滤。已验证：后端编译、Dashboard 定向测试、`npm run build` 通过。
 - `2026-04-25 16:47` | `student-quiz-accuracy` | 完成 `2026-04-25-1633-prd-demo-richness-plan` 的 P0-1 最小闭环：新增学生测验题目读取/提交接口，复用教学材料单选题，提交后用 `answer_submit` 事件保存题目快照、答案、正确性和知识点；学生首页内嵌 `Practice / Quiz` 并展示答题次数、正确数、正确率和薄弱知识点数量；预警服务纳入近 7 日低正确率。关键文件：`backend/src/main/java/com/smartedu/controller/StudentQuizController.java`、`backend/src/main/java/com/smartedu/service/StudentQuizService.java`、`backend/src/main/java/com/smartedu/service/StudentActivityEventService.java`、`backend/src/main/java/com/smartedu/service/AlertService.java`、`views/StudentHome.tsx`、`services/api.ts`、`backend/src/test/java/com/smartedu/controller/StudentQuizControllerTest.java`。仍需：浏览器手动验收和带真实材料题目的端到端演示。已验证项见本次变更文档。
 - `2026-04-25 16:24` | `prd-implementation-review` | 审查 `Draft/PRD.md` 功能实现度与代码质量，并对明显低风险问题直接修复：管理员用户创建/更新新增角色白名单和更新密码长度校验，避免未知角色被静默归一为默认角色；预警列表/状态更新新增等级与状态白名单、大小写归一和非法输入拒绝；前端 mock bootstrap 移除 `as any` 并与后端教师权限入口对齐。关键文件：`backend/src/main/java/com/smartedu/controller/AdminController.java`、`backend/src/main/java/com/smartedu/controller/AlertController.java`、`contexts/AuthContext.tsx`、`backend/src/test/java/com/smartedu/controller/AdminControllerTest.java`、`backend/src/test/java/com/smartedu/controller/AlertControllerTest.java`、`Draft/2026-04-25-1624-prd-implementation-review.md`。已验证：定向 Maven 测试、完整 `mvn -q test`、`npm run build` 均通过。仍需：真实浏览器手动验收、接口级权限与越权测试、真实 provider/视觉/答题/定时调度等 PRD 剩余项。
