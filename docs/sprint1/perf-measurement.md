@@ -2,7 +2,7 @@
 
 - **测量人**:王林睿
 - **测量日期**:2026-09-27
-- **对应 Issue**:#1
+- **对应 Issue**:#4
 - **改动范围**:`DashboardService.buildActivityTrend()`(仅此一个方法)
 
 ## 测量环境

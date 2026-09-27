@@ -186,6 +186,19 @@ class DashboardServiceTest {
         assertTrue(eventSql.get().contains("group by"), "SQL 应包含 GROUP BY,聚合在数据库完成");
         List<?> trend = (List<?>) overview.get("activityTrend");
         assertEquals(7, trend.size(), "返回结构不变:仍为最近 7 天");
+        // 校验 7 个数据点日期按时间升序、逐日连续
+        LocalDate firstDay = today.minusDays(6);
+        for (int i = 0; i < 7; i++) {
+            Map<?, ?> point = (Map<?, ?>) trend.get(i);
+            assertEquals(firstDay.plusDays(i).toString(), point.get("day"),
+                    "第 " + i + " 个数据点日期应为 " + firstDay.plusDays(i));
+        }
+        // 前天 5 条来自数据库聚合;无事件的日期(如昨天)补 0
+        Map<?, ?> dayBeforeYesterday = (Map<?, ?>) trend.get(4);
+        assertEquals(today.minusDays(2).toString(), dayBeforeYesterday.get("day"));
+        assertEquals(5L, dayBeforeYesterday.get("value"), "前天的计数应来自数据库聚合结果");
+        Map<?, ?> yesterday = (Map<?, ?>) trend.get(5);
+        assertEquals(0L, yesterday.get("value"), "无事件的日期应补 0");
         Map<?, ?> todayPoint = (Map<?, ?>) trend.get(6);
         assertEquals(today.toString(), todayPoint.get("day"));
         assertEquals(3L, todayPoint.get("value"), "今天的计数应来自数据库聚合结果");
