@@ -26,19 +26,20 @@ if ($null -eq $maven) {
     [Console]::Error.WriteLine("Backend tests unavailable: mvn.cmd was not found on PATH.")
     exit 1
 }
-Invoke-Step "backend tests" $maven.Source @("-q", "-f", $backendPom, "test")
 
 if (-not (Test-Path -LiteralPath $typeScriptCommand)) {
     [Console]::Error.WriteLine("Frontend type check unavailable: run npm ci in the project root first.")
     exit 1
 }
-Invoke-Step "frontend type check" $typeScriptCommand @("--project", $frontendConfig, "--noEmit")
 
 $npm = Get-Command npm.cmd -ErrorAction SilentlyContinue
 if ($null -eq $npm) {
     [Console]::Error.WriteLine("Frontend build unavailable: npm.cmd was not found on PATH.")
     exit 1
 }
+# Check all tools first so missing frontend dependencies do not run backend tests.
+Invoke-Step "backend tests" $maven.Source @("-q", "-f", $backendPom, "test")
+Invoke-Step "frontend type check" $typeScriptCommand @("--project", $frontendConfig, "--noEmit")
 Invoke-Step "frontend build" $npm.Source @("--prefix", $projectRoot, "run", "build")
 
 Write-Host "Project verification passed."
