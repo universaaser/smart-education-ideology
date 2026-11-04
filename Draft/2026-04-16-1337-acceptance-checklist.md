@@ -99,7 +99,7 @@
 
 ## 十三、测试与验收
 - [~] 后端单元测试和核心 service 测试。已覆盖上传结果接口、教师材料服务关键分支、聊天/鉴权/路径推荐/课程创建/知识图谱坐标更新/资源抓取兼容入口等控制器回归，并新增资源抓取去重/空标签回退、OpenAI 兼容响应提取与路由策略、上传历史/实时日志、语义搜索控制器、向量服务降级解析、选段解释触发异步索引等 service 回归；仍需扩展集成场景与异常路径。
-- [x] 本地一键回归入口。已新增 `scripts/verify_project.ps1`，按顺序执行后端测试、前端类型检查和前端构建；任一步骤失败时立即停止并返回非零退出码，并已保存成功与失败运行证据。2026-10-13 已将 Maven、TypeScript、npm 依赖检查前置，缺依赖时不启动任何阶段；七条流程用例和完整回归通过，PR #1 仍待他人 review。
+- [x] 本地一键回归入口。已新增 `scripts/verify_project.ps1`，按顺序执行后端测试、前端类型检查和前端构建；任一步骤失败时立即停止并返回非零退出码，并已保存成功与失败运行证据。2026-10-13 已将 Maven、TypeScript、npm 依赖检查前置，缺依赖时不启动任何阶段；七条流程用例和完整回归通过，PR #1 仍待他人 review。2026-11-04 新增可重复执行的 `scripts/test_verify_project.ps1`，七条流程用例已在 Windows PowerShell 5/PowerShell 7 通过；这是命令桩流程测试，不替代真实后端及构建验证。
 - [~] 前端关键页面 smoke test 或手动验收脚本。已在 `Draft/2026-04-23-1628-upload-semantic-closeout.md` 补上传解析与语义检索的手动验收脚本，并新增 `Draft/2026-04-25-0305-demo-script.md` 覆盖教师、学生、知识库更新、管理员四条主线；仍未做自动化前端 smoke test。
 - [~] API 集成测试，覆盖认证、上传、图谱、资源、聊天、预警。已新增预警 Controller 定向测试覆盖生成、汇总、列表、状态更新、学生反馈接口，课程章节/材料绑定/状态汇总 Controller 定向测试，知识源管理/运行日志/资源审核 Controller 定向测试，关键词任务 Controller 与接受重复来源结果 service 定向测试、匹配审核 Controller 定向测试、模型配置 Controller 定向测试、管理员用户/课程学生绑定与学生课程读取 Controller 定向测试，以及知识图谱关系编辑/重复提示/删除/撤销 Controller 定向测试；仍缺跨模块真实数据库集成测试。
 - [~] 爬虫失败、AI 失败、上传失败、数据库不可用等异常场景测试。已在 `Draft/2026-04-25-0305-test-cases.md` 列出异常测试用例；仍需逐项手工执行并填写实际结果。
@@ -112,6 +112,7 @@
 - 如果发现 `/Draft/毕设.md`、本清单和用户当前要求冲突，以用户当前明确要求优先，并在维护记录中说明取舍原因。
 
 ## 维护记录
+- `2026-11-04 22:17` | `verify-flow-tests` | 在 zane 新增 `scripts/test_verify_project.ps1`，固化七条依赖预检查、失败停止与成功顺序测试；生产脚本和业务逻辑不变。Windows PowerShell 5、PowerShell 7 各七例通过；反向运行初版脚本时正确检出缺 TypeScript 仍执行后端的问题。文档：`Draft/2026-11-04-2217-verify-flow-tests.md`。状态保持 [x]，PR #1 待他人 review。当前无 JDK 25，未重跑真实后端/构建/数据库验收；命令桩结果不替代真实服务测试。
 - `2026-10-13 10:15` | `verify-project-preflight` | 在 zane 上第二次推进回归入口：Maven、TypeScript、npm 依赖检查全部前置，缺依赖时不启动任何阶段；三阶段顺序和失败退出行为不变。关键文件：`scripts/verify_project.ps1`、`Draft/2026-10-13-1015-verify-project-preflight.md`。验证：七条命令桩流程用例通过，真实后端 34 套件/178 测试、前端类型检查及构建通过；Windows PowerShell 5 解析和 diff 检查通过。按用户当前同步推进要求优先于原维护组开发日期；不改其他成员任务或分支，不合并。状态保持 [x]，PR #1 仍待他人 review；真实服务联调不在本次验证范围。
 - `2026-09-26 11:57` | `verify-project` | 新增本地一键回归脚本，串联后端完整测试、前端类型检查和生产构建，并验证失败阶段立即停止、成功路径退出码为 0。关键文件：`scripts/verify_project.ps1`、`Draft/2026-09-26-1157-verify-project.md`。已验证：34 个后端测试套件共 178 个测试通过，TypeScript 类型检查通过，Vite 构建通过；使用不兼容的 Java 17 时脚本在后端阶段返回 1 且不继续执行。未完成项：PR 仍需另一名组员 review。风险：项目要求 JDK 25，运行环境需正确设置 `JAVA_HOME`。
 - `2026-04-25 17:30` | `teacher-dashboard-overview` | 完成 `2026-04-25-1633-prd-demo-richness-plan` 的 P0-2 最小闭环：新增 `/api/dashboard/overview`，聚合待处理预警、待审核资源、待审核匹配、失败解析任务、最近解析任务、材料发布统计和近 7 日学习事件趋势；教师 Dashboard 第一屏新增可跳转待办卡片、材料发布卡片和最近解析任务列表，并修正 Open Alerts 跳转到 Alerts。关键文件：`backend/src/main/java/com/smartedu/service/DashboardService.java`、`backend/src/main/java/com/smartedu/controller/DashboardController.java`、`views/Dashboard.tsx`、`services/api.ts`、`backend/src/test/java/com/smartedu/service/DashboardServiceTest.java`、`backend/src/test/java/com/smartedu/controller/DashboardControllerTest.java`。仍需：真实浏览器手动验收和更细教师归属过滤。已验证：后端编译、Dashboard 定向测试、`npm run build` 通过。
