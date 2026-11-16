@@ -5,7 +5,7 @@
 ## 环境要求
 
 - Node.js 18+，npm 9+
-- JDK 17+
+- JDK 25（后端编译和测试）
 - Maven 3.8+
 - MySQL 8+
 - 可选：本地 OpenAI-compatible 服务、MinerU、Qdrant
@@ -141,6 +141,25 @@ Vite 默认开发端口为 `5173`。生产构建与本地预览：
 ```powershell
 npm run build
 npm run preview
+```
+
+## 一键回归（Windows）
+
+先确认 `mvn -v` 显示 Java 25；如果本机有多个 JDK，将当前终端的 `JAVA_HOME` 指向 JDK 25。首次或依赖变更后在项目根目录执行 `npm ci`。
+
+在项目根目录运行：
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\verify_project.ps1
+$LASTEXITCODE
+```
+
+脚本依次运行后端测试、前端 TypeScript 类型检查和生产构建。任一步骤失败会立即停止并返回非零退出码；全部通过时输出 `Project verification passed.` 并返回 0。
+
+如需单独复核回归入口的控制流程，可运行以下命令。它使用临时命令桩，不替代上面的完整回归。
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\test_verify_project.ps1
 ```
 
 ## 演示账号与数据准备

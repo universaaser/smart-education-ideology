@@ -112,6 +112,7 @@
 - 如果发现 `/Draft/毕设.md`、本清单和用户当前要求冲突，以用户当前明确要求优先，并在维护记录中说明取舍原因。
 
 ## 维护记录
+- `2026-11-16 13:18` | `verify-project-handoff` | README 更正后端 JDK 25 要求并补回归与流程测试入口；在隔离副本复跑 JDK 25 完整三阶段（34 套件/178 测试，类型检查、构建通过），JDK 17 后端失败后退出 1 且未启动前端；两种 PowerShell 各七例通过。关键文件：`README.md`、`Draft/2026-11-16-1318-verify-project-handoff.md`。保持 [x]，仍待独立 review 与合并；未验证合并版本及真实数据库/浏览器。
 - `2026-11-04 22:17` | `verify-flow-tests` | 在 zane 新增 `scripts/test_verify_project.ps1`，固化七条依赖预检查、失败停止与成功顺序测试；生产脚本和业务逻辑不变。Windows PowerShell 5、PowerShell 7 各七例通过；反向运行初版脚本时正确检出缺 TypeScript 仍执行后端的问题。文档：`Draft/2026-11-04-2217-verify-flow-tests.md`。状态保持 [x]，PR #1 待他人 review。当前无 JDK 25，未重跑真实后端/构建/数据库验收；命令桩结果不替代真实服务测试。
 - `2026-10-13 10:15` | `verify-project-preflight` | 在 zane 上第二次推进回归入口：Maven、TypeScript、npm 依赖检查全部前置，缺依赖时不启动任何阶段；三阶段顺序和失败退出行为不变。关键文件：`scripts/verify_project.ps1`、`Draft/2026-10-13-1015-verify-project-preflight.md`。验证：七条命令桩流程用例通过，真实后端 34 套件/178 测试、前端类型检查及构建通过；Windows PowerShell 5 解析和 diff 检查通过。按用户当前同步推进要求优先于原维护组开发日期；不改其他成员任务或分支，不合并。状态保持 [x]，PR #1 仍待他人 review；真实服务联调不在本次验证范围。
 - `2026-09-26 11:57` | `verify-project` | 新增本地一键回归脚本，串联后端完整测试、前端类型检查和生产构建，并验证失败阶段立即停止、成功路径退出码为 0。关键文件：`scripts/verify_project.ps1`、`Draft/2026-09-26-1157-verify-project.md`。已验证：34 个后端测试套件共 178 个测试通过，TypeScript 类型检查通过，Vite 构建通过；使用不兼容的 Java 17 时脚本在后端阶段返回 1 且不继续执行。未完成项：PR 仍需另一名组员 review。风险：项目要求 JDK 25，运行环境需正确设置 `JAVA_HOME`。
