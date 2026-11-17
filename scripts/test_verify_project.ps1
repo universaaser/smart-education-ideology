@@ -31,7 +31,7 @@ try {
             }
             $commandDirectory = if ($stage.Command -eq "tsc") { $typeScriptDirectory } else { $toolsDirectory }
             $stubExit = if ($case.Failure -eq $stage.Command) { 9 } else { 0 }
-            $stubText = @("@echo off", "echo FIXTURE_$($stage.Marker)", "exit /b $stubExit", "") -join [Environment]::NewLine
+            $stubText = @("@echo off", "echo FIXTURE_$($stage.Marker)", "echo ARGS_$($stage.Marker) %*", "exit /b $stubExit", "") -join [Environment]::NewLine
             [IO.File]::WriteAllText((Join-Path $commandDirectory ($stage.Command + ".cmd")), $stubText, [Text.Encoding]::ASCII)
         }
 
@@ -61,9 +61,23 @@ try {
         if ($caseExit -ne $case.Exit -or $actualStages -cne $case.Stages -or $caseText -notmatch [regex]::Escape($case.Message)) {
             throw "Case $($case.Name) failed: exit=$caseExit stages=$actualStages output=$caseText"
         }
+        if ($case.Exit -eq 0) {
+            $expectedArguments = @{
+                BACKEND = @("-B", "-ntp", "-f", (Join-Path $caseRoot "backend\pom.xml"), "-DskipTests=false", "-Dmaven.test.skip=false", "-DfailIfNoTests=true", "test")
+                TYPES = @("--project", (Join-Path $caseRoot "tsconfig.json"), "--noEmit")
+                BUILD = @("--prefix", $caseRoot, "run", "build")
+            }
+            foreach ($marker in $expectedArguments.Keys) {
+                $argsLine = [regex]::Match($caseText, "(?m)^ARGS_$marker ([^\r\n]*)")
+                $actualArguments = [regex]::Matches($argsLine.Groups[1].Value, '"([^"]*)"|(\S+)') | ForEach-Object { $_.Value.Trim('"') }
+                if (($actualArguments -join "|") -cne ($expectedArguments[$marker] -join "|")) {
+                    throw "Unexpected arguments for $marker in $($case.Name): $($argsLine.Value)"
+                }
+            }
+        }
         Write-Host "PASS $($case.Name)"
     }
-    Write-Host "Verification flow tests passed (7 cases)."
+    Write-Host "Verification flow tests passed ($($cases.Count) cases)."
 } finally {
     # Remove only the unique fixture directory created by this test run.
     if (Test-Path -LiteralPath $fixtureRoot) {

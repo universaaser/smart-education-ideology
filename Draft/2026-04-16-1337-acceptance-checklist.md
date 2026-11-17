@@ -99,7 +99,7 @@
 
 ## 十三、测试与验收
 - [~] 后端单元测试和核心 service 测试。已覆盖上传结果接口、教师材料服务关键分支、聊天/鉴权/路径推荐/课程创建/知识图谱坐标更新/资源抓取兼容入口等控制器回归，并新增资源抓取去重/空标签回退、OpenAI 兼容响应提取与路由策略、上传历史/实时日志、语义搜索控制器、向量服务降级解析、选段解释触发异步索引等 service 回归；仍需扩展集成场景与异常路径。
-- [x] 本地一键回归入口。已新增 `scripts/verify_project.ps1`，按顺序执行后端测试、前端类型检查和前端构建；任一步骤失败时立即停止并返回非零退出码，并已保存成功与失败运行证据。2026-10-13 已将 Maven、TypeScript、npm 依赖检查前置，缺依赖时不启动任何阶段；七条流程用例和完整回归通过，PR #1 仍待他人 review。2026-11-04 新增可重复执行的 `scripts/test_verify_project.ps1`，七条流程用例已在 Windows PowerShell 5/PowerShell 7 通过；这是命令桩流程测试，不替代真实后端及构建验证。
+- [x] 本地一键回归入口。已新增 `scripts/verify_project.ps1`，按顺序执行后端测试、前端类型检查和前端构建；任一步骤失败时立即停止并返回非零退出码，并已保存成功与失败运行证据。2026-10-13 已将 Maven、TypeScript、npm 依赖检查前置，缺依赖时不启动任何阶段；七条流程用例和完整回归通过。PR #1 已收到同学审查，合并预览及修订验证见维护记录。2026-11-04 新增可重复执行的 `scripts/test_verify_project.ps1`，七条流程用例已在 Windows PowerShell 5/PowerShell 7 通过；这是命令桩流程测试，不替代真实后端及构建验证。
 - [~] 前端关键页面 smoke test 或手动验收脚本。已在 `Draft/2026-04-23-1628-upload-semantic-closeout.md` 补上传解析与语义检索的手动验收脚本，并新增 `Draft/2026-04-25-0305-demo-script.md` 覆盖教师、学生、知识库更新、管理员四条主线；仍未做自动化前端 smoke test。
 - [~] API 集成测试，覆盖认证、上传、图谱、资源、聊天、预警。已新增预警 Controller 定向测试覆盖生成、汇总、列表、状态更新、学生反馈接口，课程章节/材料绑定/状态汇总 Controller 定向测试，知识源管理/运行日志/资源审核 Controller 定向测试，关键词任务 Controller 与接受重复来源结果 service 定向测试、匹配审核 Controller 定向测试、模型配置 Controller 定向测试、管理员用户/课程学生绑定与学生课程读取 Controller 定向测试，以及知识图谱关系编辑/重复提示/删除/撤销 Controller 定向测试；仍缺跨模块真实数据库集成测试。
 - [~] 爬虫失败、AI 失败、上传失败、数据库不可用等异常场景测试。已在 `Draft/2026-04-25-0305-test-cases.md` 列出异常测试用例；仍需逐项手工执行并填写实际结果。
@@ -112,6 +112,7 @@
 - 如果发现 `/Draft/毕设.md`、本清单和用户当前要求冲突，以用户当前明确要求优先，并在维护记录中说明取舍原因。
 
 ## 维护记录
+- `2026-11-17 16:40` | `verify-project-review` | 响应卢琦贺在 PR #1 的审查：回归入口打印测试统计并阻止测试静默跳过，流程测试校验各阶段参数。关键文件：`scripts/verify_project.ps1`、`scripts/test_verify_project.ps1`、`README.md`、`Draft/2026-11-17-1640-verify-project-review.md`。隔离合并预览通过 179 个后端测试、类型检查和构建；两种 PowerShell 流程测试及 JDK 17 失败路径已验证；状态保持 [x]，未验证真实数据库或浏览器。
 - `2026-11-16 13:18` | `verify-project-handoff` | README 更正后端 JDK 25 要求并补回归与流程测试入口；在隔离副本复跑 JDK 25 完整三阶段（34 套件/178 测试，类型检查、构建通过），JDK 17 后端失败后退出 1 且未启动前端；两种 PowerShell 各七例通过。关键文件：`README.md`、`Draft/2026-11-16-1318-verify-project-handoff.md`。保持 [x]，仍待独立 review 与合并；未验证合并版本及真实数据库/浏览器。
 - `2026-11-04 22:17` | `verify-flow-tests` | 在 zane 新增 `scripts/test_verify_project.ps1`，固化七条依赖预检查、失败停止与成功顺序测试；生产脚本和业务逻辑不变。Windows PowerShell 5、PowerShell 7 各七例通过；反向运行初版脚本时正确检出缺 TypeScript 仍执行后端的问题。文档：`Draft/2026-11-04-2217-verify-flow-tests.md`。状态保持 [x]，PR #1 待他人 review。当前无 JDK 25，未重跑真实后端/构建/数据库验收；命令桩结果不替代真实服务测试。
 - `2026-10-13 10:15` | `verify-project-preflight` | 在 zane 上第二次推进回归入口：Maven、TypeScript、npm 依赖检查全部前置，缺依赖时不启动任何阶段；三阶段顺序和失败退出行为不变。关键文件：`scripts/verify_project.ps1`、`Draft/2026-10-13-1015-verify-project-preflight.md`。验证：七条命令桩流程用例通过，真实后端 34 套件/178 测试、前端类型检查及构建通过；Windows PowerShell 5 解析和 diff 检查通过。按用户当前同步推进要求优先于原维护组开发日期；不改其他成员任务或分支，不合并。状态保持 [x]，PR #1 仍待他人 review；真实服务联调不在本次验证范围。

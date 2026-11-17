@@ -156,6 +156,10 @@ $LASTEXITCODE
 
 脚本依次运行后端测试、前端 TypeScript 类型检查和生产构建。任一步骤失败会立即停止并返回非零退出码；全部通过时输出 `Project verification passed.` 并返回 0。
 
+在 Windows PowerShell 5.1 保存日志时，将上面的独立进程命令作为管道左侧，追加 `2>&1 | Tee-Object verify.log`，避免同进程重定向将 Maven 警告当作失败。
+
+Maven 会输出实际测试数；脚本会覆盖 Maven 的常见跳过测试选项，找不到测试时也失败。运行后 Git 可能显示已跟踪的 `backend/target/` 构建产物变化，提交时不要把这些产物一起暂存。
+
 如需单独复核回归入口的控制流程，可运行以下命令。它使用临时命令桩，不替代上面的完整回归。
 
 ```powershell

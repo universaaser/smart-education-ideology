@@ -38,7 +38,7 @@ if ($null -eq $npm) {
     exit 1
 }
 # Check all tools first so missing frontend dependencies do not run backend tests.
-Invoke-Step "backend tests" $maven.Source @("-q", "-f", $backendPom, "test")
+Invoke-Step "backend tests" $maven.Source @("-B", "-ntp", "-f", $backendPom, "-DskipTests=false", "-Dmaven.test.skip=false", "-DfailIfNoTests=true", "test")
 Invoke-Step "frontend type check" $typeScriptCommand @("--project", $frontendConfig, "--noEmit")
 Invoke-Step "frontend build" $npm.Source @("--prefix", $projectRoot, "run", "build")
 
