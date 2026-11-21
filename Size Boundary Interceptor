@@ -1,0 +1,40 @@
+// src/main/java/com/smarteducation/ideology/util/UploadSizeValidator.java
+
+package com.smarteducation.ideology.util;
+
+import org.springframework.web.multipart.MultipartFile;
+
+/**
+ * 上传文件大小校验
+ */
+public class UploadSizeValidator {
+
+    private final long maxSizeBytes;
+
+    public UploadSizeValidator(long maxSizeBytes) {
+        this.maxSizeBytes = maxSizeBytes;
+    }
+
+    /**
+     * @return null = 通过, 非 null = 错误码
+     */
+    public String validate(MultipartFile file) {
+        if (file == null || file.isEmpty()) {
+            return "FILE_EMPTY";
+        }
+
+        if (file.getSize() > maxSizeBytes) {
+            return "FILE_TOO_LARGE";
+        }
+
+        if (file.getSize() == 0) {
+            return "FILE_EMPTY";
+        }
+
+        return null; // 通过
+    }
+
+    public long getMaxSizeBytes() {
+        return maxSizeBytes;
+    }
+}
