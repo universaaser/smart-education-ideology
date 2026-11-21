@@ -36,6 +36,7 @@ import {
   DeleteOutlined,
 } from '@ant-design/icons';
 import { useAuth } from '../contexts/AuthContext';
+import { KnowledgeRelationList } from '../components/KnowledgeRelationList';
 
 const { Text, Title, Paragraph } = Typography;
 const { TextArea } = Input;
@@ -387,8 +388,6 @@ export const KnowledgeGraph: React.FC<KnowledgeGraphProps> = ({
     const node = nodes.find(item => item.id === nodeId);
     return node ? { x: node.positionX, y: node.positionY } : null;
   };
-
-  const findNodeName = (nodeId: number) => nodes.find(node => node.id === nodeId)?.name || `Node #${nodeId}`;
 
   const selectedRelations = selectedNode
     ? connections.filter(connection => connection.fromNodeId === selectedNode.id || connection.toNodeId === selectedNode.id)
@@ -810,71 +809,20 @@ export const KnowledgeGraph: React.FC<KnowledgeGraphProps> = ({
               </div>
             )}
 
-            <div>
-              <Text type="secondary" style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', marginBottom: 8, display: 'block' }}>Relations</Text>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {selectedRelations.map(connection => {
-                  const linkedId = connection.fromNodeId === selectedNode.id ? connection.toNodeId : connection.fromNodeId;
-                  const linkedNode = nodes.find(node => node.id === linkedId);
-                  if (!linkedNode) {
-                    return null;
-                  }
-                  const isSynthetic = connection.id < 0;
-                  const direction = connection.fromNodeId === selectedNode.id ? 'Outgoing' : 'Incoming';
-                  return (
-                    <div
-                      key={connection.id}
-                      style={{
-                        display: 'flex',
-                        flexDirection: 'column',
-                        gap: 8,
-                        padding: '10px 12px',
-                        border: '1px solid #f0f0f0',
-                        borderRadius: 8,
-                        background: '#fafafa',
-                      }}
-                    >
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <div style={{ width: 10, height: 10, borderRadius: '50%', background: getNodeColor(linkedNode.nodeType).border }} />
-                        <Text style={{ fontSize: 14, flex: 1, cursor: 'pointer' }} ellipsis onClick={() => setSelectedNode(linkedNode)}>
-                          {findNodeName(linkedId)}
-                        </Text>
-                        <Tag style={{ margin: 0 }}>{direction}</Tag>
-                        {isSynthetic && <Tag color="blue" style={{ margin: 0 }}>Readonly</Tag>}
-                      </div>
-                      {canEditKnowledgeGraph && !isSynthetic ? (
-                        <Space.Compact style={{ width: '100%' }}>
-                          <Select
-                            value={connection.relationType}
-                            options={RELATION_TYPES.map(type => ({ label: type, value: type }))}
-                            loading={editingRelationId === connection.id}
-                            onChange={value => void handleUpdateRelation(connection, value)}
-                            style={{ flex: 1 }}
-                          />
-                          <Popconfirm
-                            title="Delete this relation?"
-                            okText="Delete"
-                            cancelText="Cancel"
-                            okButtonProps={{ danger: true, loading: deletingRelationId === connection.id }}
-                            onConfirm={() => void handleDeleteRelation(connection)}
-                          >
-                            <Button danger icon={<DeleteOutlined />} loading={deletingRelationId === connection.id} />
-                          </Popconfirm>
-                        </Space.Compact>
-                      ) : (
-                        <Tag color="default" style={{ alignSelf: 'flex-start', margin: 0, border: 'none', background: `${getRelationColor(connection.relationType)}20`, color: getRelationColor(connection.relationType) }}>
-                          {connection.relationType}
-                        </Tag>
-                      )}
-                      {connection.description && <Text type="secondary" style={{ fontSize: 12 }}>{connection.description}</Text>}
-                    </div>
-                  );
-                })}
-                {selectedRelations.length === 0 && (
-                  <Text type="secondary" style={{ fontSize: 13 }}>No linked nodes</Text>
-                )}
-              </div>
-            </div>
+            <KnowledgeRelationList
+              selectedNode={selectedNode}
+              nodes={nodes}
+              relations={selectedRelations}
+              canEdit={canEditKnowledgeGraph}
+              editingRelationId={editingRelationId}
+              deletingRelationId={deletingRelationId}
+              relationTypes={RELATION_TYPES}
+              getNodeColor={getNodeColor}
+              getRelationColor={getRelationColor}
+              onSelectNode={setSelectedNode}
+              onUpdateRelation={(connection, relationType) => void handleUpdateRelation(connection, relationType)}
+              onDeleteRelation={connection => void handleDeleteRelation(connection)}
+            />
 
             <Divider style={{ margin: '8px 0' }} />
 
