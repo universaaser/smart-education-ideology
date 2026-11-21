@@ -1,0 +1,231 @@
+// src/test/java/com/smarteducation/ideology/controller/ResourceUploadControllerTest.java
+
+package com.smarteducation.ideology.controller;
+
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.mock.web.MockMultipartFile;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.request.MockMvcRequestBuilders;
+import org.springframework.test.web.servlet.result.MockMvcResultMatchers;
+
+import java.io.File;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.Arrays;
+import java.util.List;
+
+import static org.junit.jupiter.api.Assertions.*;
+
+@SpringBootTest
+@AutoConfigureMockMvc
+class ResourceUploadControllerTest {
+
+    @Autowired
+    private MockMvc mockMvc;
+
+    @TempDir
+    Path tempUploadDir;
+
+    @BeforeEach
+    void setUp() {
+        // 覆盖上传目录为临时目录
+        System.setProperty("upload.storage-path", tempUploadDir.toAbsolutePath().toString());
+        System.setProperty("upload.max-size", "1048576"); // 1 MB for testing
+    }
+
+    // ========== 合法文件 ==========
+
+    @Test
+    void testValidPdf() throws Exception {
+        // %PDF- header
+        byte[] pdfHeader = new byte[]{(byte) 0x25, (byte) 0x50, (byte) 0x44, (byte) 0x46, (byte) 0x2D, 0x31, 0x2E, 0x34};
+        byte[] body = " legitimate PDF content".getBytes();
+        byte[] content = new byte[pdfHeader.length + body.length];
+        System.arraycopy(pdfHeader, 0, content, 0, pdfHeader.length);
+        System.arraycopy(body, 0, content, pdfHeader.length, body.length);
+
+        MockMultipartFile file = new MockMultipartFile(
+                "file", "lecture.pdf", "application/pdf", content
+        );
+
+        int beforeCount = countFilesInUploadDir();
+
+        mockMvc.perform(MockMvcRequestBuilders.multipart("/api/resources/upload").file(file))
+                .andExpect(MockMvcResultMatchers.status().isOk());
+
+        int afterCount = countFilesInUploadDir();
+        assertEquals(beforeCount + 1, afterCount, "合法文件应新增 1 个落盘文件");
+    }
+
+    @Test
+    void testValidDocx() throws Exception {
+        // ZIP header (DOCX is ZIP-based)
+        byte[] zipHeader = new byte[]{(byte) 0x50, (byte) 0x4B, (byte) 0x03, (byte) 0x04};
+        byte[] body = new byte[100]; // padding
+        byte[] content = new byte[zipHeader.length + body.length];
+        System.arraycopy(zipHeader, 0, content, 0, zipHeader.length);
+        System.arraycopy(body, 0, content, zipHeader.length, body.length);
+
+        MockMultipartFile file = new MockMultipartFile(
+                "file", "report.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", content
+        );
+
+        int beforeCount = countFilesInUploadDir();
+
+        mockMvc.perform(MockMvcRequestBuilders.multipart("/api/resources/upload").file(file))
+                .andExpect(MockMvcResultMatchers.status().isOk());
+
+        assertEquals(beforeCount + 1, countFilesInUploadDir());
+    }
+
+    @Test
+    void testValidMarkdown() throws Exception {
+        byte[] content = "# Hello\n\nThis is a **markdown** file.".getBytes("UTF-8");
+
+        MockMultipartFile file = new MockMultipartFile(
+                "file", "readme.md", "text/markdown", content
+        );
+
+        int beforeCount = countFilesInUploadDir();
+
+        mockMvc.perform(MockMvcRequestBuilders.multipart("/api/resources/upload").file(file))
+                .andExpect(MockMvcResultMatchers.status().isOk());
+
+        assertEquals(beforeCount + 1, countFilesInUploadDir());
+    }
+
+    // ========== 空文件 ==========
+
+    @Test
+    void testEmptyFile() throws Exception {
+        MockMultipartFile file = new MockMultipartFile(
+                "file", "empty.pdf", "application/pdf", new byte[0]
+        );
+
+        int beforeCount = countFilesInUploadDir();
+
+        mockMvc.perform(MockMvcRequestBuilders.multipart("/api/resources/upload").file(file))
+                .andExpect(MockMvcResultMatchers.status().isBadRequest());
+
+        assertEquals(beforeCount, countFilesInUploadDir(), "空文件拒绝后上传目录不应新增文件");
+    }
+
+    // ========== 超限文件 ==========
+
+    @Test
+    void testOversizedFile() throws Exception {
+        // 构造 2 MB 文件（超过 1 MB 限制）
+        byte[] pdfHeader = new byte[]{(byte) 0x25, (byte) 0x50, (byte) 0x44, (byte) 0x46, (byte) 0x2D};
+        byte[] body = new byte[2 * 1024 * 1024]; // 2 MB
+        byte[] content = new byte[pdfHeader.length + body.length];
+        System.arraycopy(pdfHeader, 0, content, 0, pdfHeader.length);
+
+        MockMultipartFile file = new MockMultipartFile(
+                "file", "huge.pdf", "application/pdf", content
+        );
+
+        int beforeCount = countFilesInUploadDir();
+
+        mockMvc.perform(MockMvcRequestBuilders.multipart("/api/resources/upload").file(file))
+                .andExpect(MockMvcResultMatchers.status().isPayloadTooLarge());
+
+        assertEquals(beforeCount, countFilesInUploadDir(), "超限文件拒绝后上传目录不应新增文件");
+    }
+
+    @Test
+    void testBoundarySizeFile() throws Exception {
+        // 正好 1 MB（边界值）
+        byte[] pdfHeader = new byte[]{(byte) 0x25, (byte) 0x50, (byte) 0x44, (byte) 0x46, (byte) 0x2D};
+        byte[] body = new byte[1024 * 1024 - pdfHeader.length]; // 精确 1 MB
+        byte[] content = new byte[pdfHeader.length + body.length];
+        System.arraycopy(pdfHeader, 0, content, 0, pdfHeader.length);
+
+        MockMultipartFile file = new MockMultipartFile(
+                "file", "boundary.pdf", "application/pdf", content
+        );
+
+        int beforeCount = countFilesInUploadDir();
+
+        mockMvc.perform(MockMvcRequestBuilders.multipart("/api/resources/upload").file(file))
+                .andExpect(MockMvcResultMatchers.status().isOk());
+
+        assertEquals(beforeCount + 1, countFilesInUploadDir(), "边界值文件应被接受");
+    }
+
+    // ========== 伪装类型 ==========
+
+    @Test
+    void testSpoofedScriptAsPdf() throws Exception {
+        // 脚本内容伪装成 PDF
+        byte[] scriptContent = "#!/bin/bash\necho 'malicious'".getBytes();
+
+        MockMultipartFile file = new MockMultipartFile(
+                "file", "fake.pdf", "application/pdf", scriptContent
+        );
+
+        int beforeCount = countFilesInUploadDir();
+
+        mockMvc.perform(MockMvcRequestBuilders.multipart("/api/resources/upload").file(file))
+                .andExpect(MockMvcResultMatchers.status().isBadRequest());
+
+        assertEquals(beforeCount, countFilesInUploadDir(), "伪装脚本拒绝后上传目录不应新增文件");
+    }
+
+    @Test
+    void testPngRenamedAsMd() throws Exception {
+        // PNG header
+        byte[] pngHeader = new byte[]{(byte) 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A};
+        byte[] body = new byte[100];
+        byte[] content = new byte[pngHeader.length + body.length];
+        System.arraycopy(pngHeader, 0, content, 0, pngHeader.length);
+
+        MockMultipartFile file = new MockMultipartFile(
+                "file", "image.md", "text/markdown", content
+        );
+
+        int beforeCount = countFilesInUploadDir();
+
+        mockMvc.perform(MockMvcRequestBuilders.multipart("/api/resources/upload").file(file))
+                .andExpect(MockMvcResultMatchers.status().isBadRequest());
+
+        assertEquals(beforeCount, countFilesInUploadDir(), "PNG 改名 MD 拒绝后上传目录不应新增文件");
+    }
+
+    // ========== 不允许的类型 ==========
+
+    @Test
+    void testDisallowedExeFile() throws Exception {
+        // PE header (MZ)
+        byte[] peHeader = new byte[]{0x4D, 0x5A, 0x90, 0x00};
+        byte[] body = new byte[100];
+        byte[] content = new byte[peHeader.length + body.length];
+        System.arraycopy(peHeader, 0, content, 0, peHeader.length);
+
+        MockMultipartFile file = new MockMultipartFile(
+                "file", "malware.exe", "application/octet-stream", content
+        );
+
+        int beforeCount = countFilesInUploadDir();
+
+        mockMvc.perform(MockMvcRequestBuilders.multipart("/api/resources/upload").file(file))
+                .andExpect(MockMvcResultMatchers.status().isBadRequest());
+
+        assertEquals(beforeCount, countFilesInUploadDir(), "不允许的类型拒绝后上传目录不应新增文件");
+    }
+
+    // ========== 辅助方法 ==========
+
+    private int countFilesInUploadDir() {
+        File dir = new File(System.getProperty("upload.storage-path"));
+        if (!dir.exists() || !dir.isDirectory()) {
+            return 0;
+        }
+        File[] files = dir.listFiles();
+        return files != null ? files.length : 0;
+    }
+}
