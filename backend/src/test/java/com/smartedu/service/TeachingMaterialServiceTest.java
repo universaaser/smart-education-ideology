@@ -404,16 +404,36 @@ class TeachingMaterialServiceTest {
         request.setLectureNotes("Draft notes");
         request.setCases(List.of("Case D"));
         request.setQuestions(new ArrayList<>());
+        request.setChapterId(42L);
 
         TeachingMaterialDraftDto draft = teachingMaterialService.saveDraft(1L, request);
         assertNotNull(draft.getMaterialId());
+        assertEquals(1L, draft.getParseTaskId());
+        assertEquals(7L, draft.getUserId());
+        assertEquals(9L, draft.getCourseId());
+        assertEquals(42L, draft.getChapterId());
+        assertEquals("Draft from published", draft.getTitle());
+        assertEquals("Draft notes", draft.getLectureNotes());
+        assertEquals(List.of("Case D"), draft.getCases());
+        assertEquals(1, draft.getTraceItems().size());
+        assertEquals("v1", draft.getSchemaVersion());
         assertEquals("DRAFT", draft.getStatus());
         assertEquals(3, draft.getVersionNo());
         assertEquals(0, published.getIsLatest());
-        assertTrue(store.records.stream().anyMatch(item ->
-                !item.getId().equals(published.getId())
-                        && "DRAFT".equals(item.getStatus())
-                        && Integer.valueOf(1).equals(item.getIsLatest())));
+        TeachingMaterial savedDraft = store.records.stream()
+                .filter(item -> !item.getId().equals(published.getId()))
+                .findFirst()
+                .orElseThrow();
+        assertEquals(1L, savedDraft.getParseTaskId());
+        assertEquals(7L, savedDraft.getUserId());
+        assertEquals(9L, savedDraft.getCourseId());
+        assertEquals(42L, savedDraft.getChapterId());
+        assertEquals("DRAFT", savedDraft.getStatus());
+        assertEquals(1, savedDraft.getIsLatest());
+        assertNotNull(savedDraft.getDocumentStructureJson());
+        assertTrue(savedDraft.getKnowledgePointsJson().contains("IoT Security"));
+        assertTrue(savedDraft.getIdeologyMatchesJson().contains("Cyber Responsibility"));
+        assertTrue(savedDraft.getTraceJson().contains("Cyber Responsibility"));
     }
 
     @Test

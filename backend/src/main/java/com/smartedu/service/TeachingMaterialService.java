@@ -114,19 +114,10 @@ public class TeachingMaterialService {
             TeachingMaterial created = new TeachingMaterial();
             created.setParseTaskId(taskId);
             created.setUserId(task.getUserId());
-            created.setCourseId(task.getCourseId());
-            created.setChapterId(normalizedRequest.getChapterId());
-            applyEditableContent(created, normalizedRequest, task.getFileName());
-            created.setDocumentStructureJson(writeJsonSafely(pipeline == null ? null : pipeline.getDocumentStructure()));
-            created.setKnowledgePointsJson(writeJsonSafely(pipeline == null ? null : pipeline.getKnowledgePoints()));
-            created.setIdeologyMatchesJson(writeJsonSafely(pipeline == null ? null : pipeline.getIdeologyMatches()));
-            created.setTraceJson(writeJsonSafely(traceItems));
-            created.setSchemaVersion(resolveSchemaVersion(pipeline));
+            applyDraftState(created, task, normalizedRequest, pipeline, traceItems);
             created.setVersionNo(1);
             created.setIsLatest(1);
-            created.setStatus(STATUS_DRAFT);
             created.setCreatedAt(LocalDateTime.now());
-            created.setUpdatedAt(LocalDateTime.now());
             teachingMaterialMapper.insert(created);
             syncTraceRows(created.getId(), taskId, task.getCourseId(), traceItems, true);
             return toDraftDto(created);
@@ -140,34 +131,16 @@ public class TeachingMaterialService {
             TeachingMaterial draft = new TeachingMaterial();
             draft.setParseTaskId(taskId);
             draft.setUserId(task.getUserId());
-            draft.setCourseId(task.getCourseId());
-            draft.setChapterId(normalizedRequest.getChapterId());
-            applyEditableContent(draft, normalizedRequest, task.getFileName());
-            draft.setDocumentStructureJson(writeJsonSafely(pipeline == null ? null : pipeline.getDocumentStructure()));
-            draft.setKnowledgePointsJson(writeJsonSafely(pipeline == null ? null : pipeline.getKnowledgePoints()));
-            draft.setIdeologyMatchesJson(writeJsonSafely(pipeline == null ? null : pipeline.getIdeologyMatches()));
-            draft.setTraceJson(writeJsonSafely(traceItems));
-            draft.setSchemaVersion(resolveSchemaVersion(pipeline));
+            applyDraftState(draft, task, normalizedRequest, pipeline, traceItems);
             draft.setVersionNo(latest.getVersionNo() == null ? 1 : latest.getVersionNo());
             draft.setIsLatest(1);
-            draft.setStatus(STATUS_DRAFT);
             draft.setCreatedAt(LocalDateTime.now());
-            draft.setUpdatedAt(LocalDateTime.now());
             teachingMaterialMapper.insert(draft);
             syncTraceRows(draft.getId(), taskId, task.getCourseId(), traceItems, true);
             return toDraftDto(draft);
         }
 
-        latest.setCourseId(task.getCourseId());
-        latest.setChapterId(normalizedRequest.getChapterId());
-        applyEditableContent(latest, normalizedRequest, task.getFileName());
-        latest.setDocumentStructureJson(writeJsonSafely(pipeline == null ? null : pipeline.getDocumentStructure()));
-        latest.setKnowledgePointsJson(writeJsonSafely(pipeline == null ? null : pipeline.getKnowledgePoints()));
-        latest.setIdeologyMatchesJson(writeJsonSafely(pipeline == null ? null : pipeline.getIdeologyMatches()));
-        latest.setTraceJson(writeJsonSafely(traceItems));
-        latest.setSchemaVersion(resolveSchemaVersion(pipeline));
-        latest.setStatus(STATUS_DRAFT);
-        latest.setUpdatedAt(LocalDateTime.now());
+        applyDraftState(latest, task, normalizedRequest, pipeline, traceItems);
         teachingMaterialMapper.updateById(latest);
         syncTraceRows(latest.getId(), taskId, task.getCourseId(), traceItems, true);
         return toDraftDto(latest);
@@ -509,6 +482,24 @@ public class TeachingMaterialService {
         target.setLectureNotes(trimToLength(safe(request.getLectureNotes()), 10000));
         target.setCasesJson(writeJsonSafely(safeList(request.getCases())));
         target.setQuestionsJson(writeJsonSafely(safeQuestionList(request.getQuestions())));
+    }
+
+    private void applyDraftState(
+            TeachingMaterial target,
+            ParseTask task,
+            TeachingMaterialSaveRequestDto request,
+            PipelineResultDto pipeline,
+            List<TeachingTraceItemDto> traceItems) {
+        target.setCourseId(task.getCourseId());
+        target.setChapterId(request.getChapterId());
+        applyEditableContent(target, request, task.getFileName());
+        target.setDocumentStructureJson(writeJsonSafely(pipeline == null ? null : pipeline.getDocumentStructure()));
+        target.setKnowledgePointsJson(writeJsonSafely(pipeline == null ? null : pipeline.getKnowledgePoints()));
+        target.setIdeologyMatchesJson(writeJsonSafely(pipeline == null ? null : pipeline.getIdeologyMatches()));
+        target.setTraceJson(writeJsonSafely(traceItems));
+        target.setSchemaVersion(resolveSchemaVersion(pipeline));
+        target.setStatus(STATUS_DRAFT);
+        target.setUpdatedAt(LocalDateTime.now());
     }
 
     /**
