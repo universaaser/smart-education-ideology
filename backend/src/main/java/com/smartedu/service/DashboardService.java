@@ -1,6 +1,7 @@
 package com.smartedu.service;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.smartedu.entity.Course;
 import com.smartedu.entity.ParseTask;
 import com.smartedu.entity.Resource;
@@ -288,12 +289,22 @@ public class DashboardService {
         LocalDate today = LocalDate.now();
         LocalDate startDate = today.minusDays(6);
         LocalDateTime startAt = startDate.atStartOfDay();
-        List<StudentActivityEvent> events = studentActivityEventMapper.selectList(new LambdaQueryWrapper<StudentActivityEvent>()
-                .ge(StudentActivityEvent::getOccurredAt, startAt));
+        // 性能优化:按天聚合并下推给数据库(GROUP BY),最多返回 7 行,
+        // 替代原先的「全量读取事件表 → 内存中逐条计数」。
+        // 对外返回结构完全不变:7 个 {day, value} 数据点。
+        QueryWrapper<StudentActivityEvent> wrapper = new QueryWrapper<>();
+        wrapper.select("DATE(occurred_at) AS day", "COUNT(*) AS value")
+                .ge("occurred_at", startAt)
+                .groupBy("DATE(occurred_at)");
+        List<Map<String, Object>> rows = studentActivityEventMapper.selectMaps(wrapper);
         Map<LocalDate, Long> counts = new HashMap<>();
-        for (StudentActivityEvent event : events) {
-            LocalDate day = event.getOccurredAt() == null ? today : event.getOccurredAt().toLocalDate();
-            counts.put(day, counts.getOrDefault(day, 0L) + 1);
+        for (Map<String, Object> row : rows) {
+            Object day = row.get("day");
+            Object value = row.get("value");
+            if (day == null || value == null) {
+                continue;
+            }
+            counts.put(LocalDate.parse(day.toString()), ((Number) value).longValue());
         }
         List<Map<String, Object>> result = new ArrayList<>();
         for (int i = 0; i < 7; i++) {
