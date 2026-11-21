@@ -1,0 +1,121 @@
+// src/main/java/com/smarteducation/ideology/controller/ResourceUploadController.java
+
+package com.smarteducation.ideology.controller;
+
+import com.smarteducation.ideology.util.FileHeaderValidator;
+import com.smarteducation.ideology.util.UploadSizeValidator;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
+
+import java.io.File;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.util.Arrays;
+import java.util.List;
+import java.util.UUID;
+
+@RestController
+@RequestMapping("/api/resources")
+public class ResourceUploadController {
+
+    @Value("${upload.max-size:104857600}")
+    private long maxSizeBytes;
+
+    @Value("${upload.allowed-types:pdf,doc,docx,ppt,pptx,xls,xlsx,md,markdown}")
+    private String allowedTypesStr;
+
+    @Value("${upload.storage-path:./uploads}")
+    private String storagePath;
+
+    private UploadSizeValidator sizeValidator;
+
+    @PostConstruct
+    public void init() {
+        sizeValidator = new UploadSizeValidator(maxSizeBytes);
+        new File(storagePath).mkdirs();
+    }
+
+    private final List<String> allowedExtensions = Arrays.asList(
+            allowedTypesStr.split(",")
+    );
+
+    @PostMapping("/upload")
+    public ResponseEntity<?> upload(@RequestParam("file") MultipartFile file) {
+        // ---- 1. 大小校验 ----
+        String sizeError = sizeValidator.validate(file);
+        if (sizeError != null) {
+            return ResponseEntity.status(
+                    "FILE_EMPTY".equals(sizeError) ? HttpStatus.BAD_REQUEST : HttpStatus.PAYLOAD_TOO_LARGE
+            ).body(new ErrorResponse(sizeError, getReadableMessage(sizeError)));
+        }
+
+        // ---- 2. 扩展名校验 ----
+        String originalFilename = file.getOriginalFilename();
+        if (originalFilename == null || !originalFilename.contains(".")) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                    .body(new ErrorResponse("INVALID_FILENAME", "文件名无效"));
+        }
+
+        String ext = originalFilename.substring(originalFilename.lastIndexOf('.') + 1).toLowerCase();
+        if (!allowedExtensions.contains(ext)) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                    .body(new ErrorResponse("TYPE_NOT_ALLOWED", "文件类型不在允许列表中"));
+        }
+
+        // ---- 3. 文件头校验（核心安全点）----
+        try {
+            boolean headerValid = FileHeaderValidator.validate(file, ext);
+            if (!headerValid) {
+                return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                        .body(new ErrorResponse("FILE_HEADER_MISMATCH", "文件内容与实际类型不匹配"));
+            }
+        } catch (IOException e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(new ErrorResponse("READ_ERROR", "文件读取失败"));
+        }
+
+        // ---- 4. 全部通过 → 落盘 ----
+        try {
+            String storedName = UUID.randomUUID() + "." + ext;
+            Path dest = Paths.get(storagePath, storedName);
+            file.transferTo(dest);
+
+            // TODO: 创建解析任务
+            // resourceService.createParseTask(storedName, originalFilename);
+
+            return ResponseEntity.ok(new UploadResponse("SUCCESS", storedName, originalFilename));
+        } catch (IOException e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(new ErrorResponse("WRITE_ERROR", "文件保存失败"));
+        }
+    }
+
+    private String getReadableMessage(String code) {
+        switch (code) {
+            case "FILE_EMPTY": return "文件不能为空";
+            case "FILE_TOO_LARGE": return "文件大小超过限制（最大 " + (maxSizeBytes / 1024 / 1024) + " MB）";
+            default: return "未知错误";
+        }
+    }
+
+    // ---- DTOs ----
+    public static class ErrorResponse {
+        public String code;
+        public String message;
+        public ErrorResponse(String code, String message) { this.code = code; this.message = message; }
+    }
+
+    public static class UploadResponse {
+        public String status;
+        public String storedName;
+        public String originalFilename;
+        public UploadResponse(String status, String storedName, String originalFilename) {
+            this.status = status; this.storedName = storedName; this.originalFilename = originalFilename;
+        }
+    }
+}
