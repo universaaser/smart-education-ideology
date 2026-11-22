@@ -16,11 +16,13 @@ import com.smartedu.service.AiIntelligenceService;
 import com.smartedu.service.AiStreamBuffer;
 import com.smartedu.service.ParseTaskCorrectionService;
 import com.smartedu.service.TeachingMaterialService;
+import com.smartedu.util.UploadValidator;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.util.unit.DataSize;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -34,6 +36,7 @@ import java.nio.file.Paths;
 import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 
@@ -64,6 +67,9 @@ public class UploadController {
     @Value("${storage.allowed-types}")
     private String allowedTypes;
 
+    @Value("${storage.max-size:100MB}")
+    private DataSize maxFileSize;
+
     /**
      * 上传文件
      * 
@@ -82,9 +88,14 @@ public class UploadController {
             return Result.badRequest("User id cannot be empty");
         }
 
-        // 1. 校验文件
-        if (file.isEmpty()) {
-            return Result.badRequest("请选择要上传的文件");
+        // 1. 校验文件：全部通过后才允许落盘，拒绝时上传目录保持不变
+        String sizeError = UploadValidator.checkSize(file, maxFileSize.toBytes());
+        if (sizeError != null) {
+            if ("FILE_EMPTY".equals(sizeError)) {
+                return Result.error(400, "FILE_EMPTY: No file was provided");
+            }
+            return Result.error(413, "FILE_TOO_LARGE: File size exceeds the limit (max "
+                    + String.format(Locale.ROOT, "%dMB", maxFileSize.toMegabytes()) + ")");
         }
 
         String originalFilename = file.getOriginalFilename();
@@ -92,10 +103,18 @@ public class UploadController {
             return Result.badRequest("文件名不能为空");
         }
 
-        // 检查文件类型
+        // 扩展名白名单按完整项匹配，避免 "pd" 之类的子串被 "pdf" 放行
         String extension = getFileExtension(originalFilename).toLowerCase();
-        if (!allowedTypes.contains(extension)) {
-            return Result.badRequest("不支持的文件类型，允许：" + allowedTypes);
+        if (!UploadValidator.isAllowedType(extension, allowedTypes)) {
+            return Result.badRequest("TYPE_NOT_ALLOWED: Unsupported file type; allowed: " + allowedTypes);
+        }
+
+        try {
+            if (!UploadValidator.headerMatches(file, extension)) {
+                return Result.badRequest("FILE_HEADER_MISMATCH: File content does not match its type");
+            }
+        } catch (IOException e) {
+            return Result.error(400, "FILE_HEADER_READ_ERROR: Failed to read file");
         }
 
         try {

@@ -14,8 +14,10 @@ spring:
     password: root
   servlet:
     multipart:
-      max-file-size: 50MB
-      max-request-size: 50MB
+      # Stay above storage.max-size so the controller can return the business 413 envelope first.
+      # MaxUploadSizeExceededException is handled globally for requests beyond this container limit.
+      max-file-size: 105MB
+      max-request-size: 125MB
   jackson:
     date-format: yyyy-MM-dd HH:mm:ss
     time-zone: Asia/Shanghai
@@ -141,6 +143,7 @@ qdrant:
 storage:
   upload-path: ./uploads
   allowed-types: pdf,doc,docx,ppt,pptx,xls,xlsx,md,markdown
+  max-size: 100MB
 
 logging:
   level:

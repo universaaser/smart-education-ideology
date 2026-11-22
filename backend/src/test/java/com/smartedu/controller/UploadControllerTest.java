@@ -25,14 +25,26 @@ import com.smartedu.service.VectorIndexAsyncService;
 import com.smartedu.service.VectorIndexService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+import org.springframework.mock.web.MockMultipartFile;
+import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.util.unit.DataSize;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
+import java.io.IOException;
 import java.lang.reflect.Proxy;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
+import java.util.stream.Stream;
 
+import static org.hamcrest.Matchers.containsString;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -45,6 +57,10 @@ class UploadControllerTest {
     private MockMvc mockMvc;
     private PipelineResultDto resultDto;
     private AiStreamBuffer aiStreamBuffer;
+    private UploadController controller;
+
+    @TempDir
+    Path tempUploadDir;
 
     @BeforeEach
     void setUp() throws Exception {
@@ -140,12 +156,15 @@ class UploadControllerTest {
                 ),
                 new ObjectMapper()
         );
-        UploadController controller = new UploadController(
+        controller = new UploadController(
                 parseTaskMapper,
                 aiIntelligenceService,
                 teachingMaterialService,
                 parseTaskCorrectionService,
                 aiStreamBuffer);
+        ReflectionTestUtils.setField(controller, "uploadPath", tempUploadDir.toAbsolutePath().toString());
+        ReflectionTestUtils.setField(controller, "allowedTypes", "pdf,doc,docx,ppt,pptx,xls,xlsx,md,markdown");
+        ReflectionTestUtils.setField(controller, "maxFileSize", DataSize.ofKilobytes(1));
         mockMvc = MockMvcBuilders.standaloneSetup(controller).build();
     }
 
@@ -298,6 +317,156 @@ class UploadControllerTest {
                 .andExpect(jsonPath("$.data.records[0].fileName").value("iot-outline.docx"))
                 .andExpect(jsonPath("$.data.records[0].parseMode").value("MINERU"))
                 .andExpect(jsonPath("$.data.total").value(1));
+    }
+
+    // ===== Upload boundary and file header validation =====
+
+    @Test
+    void shouldAcceptValidPdf() throws Exception {
+        mockMvc.perform(multipart("/api/upload/file")
+                        .file(new MockMultipartFile("file", "lecture.pdf", "application/pdf", pdfContent(32)))
+                        .param("userId", "9"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200));
+
+        assertEquals(1L, countStoredFiles());
+    }
+
+    @Test
+    void shouldAcceptValidDocx() throws Exception {
+        byte[] content = new byte[64];
+        System.arraycopy(zipSignature(), 0, content, 0, zipSignature().length);
+
+        mockMvc.perform(multipart("/api/upload/file")
+                        .file(new MockMultipartFile("file", "notes.docx",
+                                "application/vnd.openxmlformats-officedocument.wordprocessingml.document", content))
+                        .param("userId", "9"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200));
+
+        assertEquals(1L, countStoredFiles());
+    }
+
+    @Test
+    void shouldAcceptValidMarkdown() throws Exception {
+        byte[] content = "# Notes\n\nBody text".getBytes(StandardCharsets.UTF_8);
+
+        mockMvc.perform(multipart("/api/upload/file")
+                        .file(new MockMultipartFile("file", "notes.md", "text/markdown", content))
+                        .param("userId", "9"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200));
+
+        assertEquals(1L, countStoredFiles());
+    }
+
+    @Test
+    void shouldAcceptChineseMarkdown() throws Exception {
+        byte[] content = "# 思政课程笔记\n\n关键词：课程思政、物联网。\n".getBytes(StandardCharsets.UTF_8);
+
+        mockMvc.perform(multipart("/api/upload/file")
+                        .file(new MockMultipartFile("file", "中文笔记.markdown", "text/markdown", content))
+                        .param("userId", "9"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200));
+
+        assertEquals(1L, countStoredFiles());
+    }
+
+    @Test
+    void shouldRejectEmptyFileWithoutWriting() throws Exception {
+        mockMvc.perform(multipart("/api/upload/file")
+                        .file(new MockMultipartFile("file", "empty.pdf", "application/pdf", new byte[0]))
+                        .param("userId", "9"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(400))
+                .andExpect(jsonPath("$.message").value(containsString("FILE_EMPTY")));
+
+        assertEquals(0L, countStoredFiles());
+    }
+
+    @Test
+    void shouldRejectFileOneByteOverLimitWithoutWriting() throws Exception {
+        mockMvc.perform(multipart("/api/upload/file")
+                        .file(new MockMultipartFile("file", "huge.pdf", "application/pdf", pdfContent(1025)))
+                        .param("userId", "9"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(413))
+                .andExpect(jsonPath("$.message").value(containsString("FILE_TOO_LARGE")));
+
+        assertEquals(0L, countStoredFiles());
+    }
+
+    @Test
+    void shouldAcceptFileExactlyAtLimit() throws Exception {
+        mockMvc.perform(multipart("/api/upload/file")
+                        .file(new MockMultipartFile("file", "boundary.pdf", "application/pdf", pdfContent(1024)))
+                        .param("userId", "9"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200));
+
+        assertEquals(1L, countStoredFiles());
+    }
+
+    @Test
+    void shouldRejectScriptSpoofedAsPdfWithoutWriting() throws Exception {
+        byte[] script = "#!/bin/sh\necho unsafe".getBytes(StandardCharsets.US_ASCII);
+
+        mockMvc.perform(multipart("/api/upload/file")
+                        .file(new MockMultipartFile("file", "fake.pdf", "application/pdf", script))
+                        .param("userId", "9"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(400))
+                .andExpect(jsonPath("$.message").value(containsString("FILE_HEADER_MISMATCH")));
+
+        assertEquals(0L, countStoredFiles());
+    }
+
+    @Test
+    void shouldRejectPngRenamedAsMarkdownWithoutWriting() throws Exception {
+        byte[] png = {(byte) 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A,
+                0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52};
+
+        mockMvc.perform(multipart("/api/upload/file")
+                        .file(new MockMultipartFile("file", "picture.md", "text/markdown", png))
+                        .param("userId", "9"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(400))
+                .andExpect(jsonPath("$.message").value(containsString("FILE_HEADER_MISMATCH")));
+
+        assertEquals(0L, countStoredFiles());
+    }
+
+    @Test
+    void shouldRejectDisallowedExecutableWithoutWriting() throws Exception {
+        byte[] executable = {0x4D, 0x5A, (byte) 0x90, 0x00, 0x03, 0x00, 0x00, 0x00};
+
+        mockMvc.perform(multipart("/api/upload/file")
+                        .file(new MockMultipartFile("file", "tool.exe", "application/octet-stream", executable))
+                        .param("userId", "9"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(400))
+                .andExpect(jsonPath("$.message").value(containsString("TYPE_NOT_ALLOWED")));
+
+        assertEquals(0L, countStoredFiles());
+    }
+
+    private long countStoredFiles() throws IOException {
+        try (Stream<Path> paths = Files.list(tempUploadDir)) {
+            return paths.count();
+        }
+    }
+
+    private static byte[] pdfContent(int length) {
+        byte[] content = new byte[length];
+        byte[] header = {(byte) 0x25, (byte) 0x50, (byte) 0x44, (byte) 0x46, (byte) 0x2D};
+        System.arraycopy(header, 0, content, 0, header.length);
+        Arrays.fill(content, header.length, length, (byte) 'a');
+        return content;
+    }
+
+    private static byte[] zipSignature() {
+        return new byte[]{(byte) 0x50, (byte) 0x4B, (byte) 0x03, (byte) 0x04};
     }
 
     private ParseTaskMapper buildMapperStub(ParseTask task) {
