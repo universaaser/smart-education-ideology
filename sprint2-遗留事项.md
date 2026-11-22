@@ -100,7 +100,7 @@ Issue 中提出的建议方向：
 
 上传校验已按 §1 的九条测试矩阵补做：校验逻辑进入 `backend/src/main/java/com/smartedu`，配置声明 `storage.max-size: 100MB`，`UploadControllerTest` 新增 9 条用例并逐条断言拒绝后上传目录无新增文件。定向测试 24 条、全量后端回归 188 条通过。补做分支为 `feature/upload-size-header-validation`，细节见 `Draft/2026-11-22-1730-upload-validation-closeout.md`。
 
-- 状态：`implemented-pending-PR`，尚未推送 GitHub、尚未创建 PR 与 review，不能视为已合并。
+- 状态：`implemented-pending-review`。分支已推送，已创建 [Issue #15](https://github.com/universaaser/smart-education-ideology/issues/15) 与 [PR #16](https://github.com/universaaser/smart-education-ideology/pull/16)，已请求另一名组员审查；尚未合并，不能视为完成项。
 - 未做真实 HTTP 多部分请求与解析服务联调；生产环境大文件行为待复核。
 - 跨平台启动仍按 Issue #3 单独跟踪，不属于本次补做。
 
@@ -108,7 +108,7 @@ Issue 中提出的建议方向：
 
 | 编号 | 事项 | Sprint 2 状态 | Sprint 3 补做状态 | 跟踪位置 |
 |---|---|---|---|---|
-| 1 | 上传大小边界 + 文件头校验 | 未完成，未找到实现 PR | 已实现，测试通过，待推送/PR | 本文档 §1、§3 |
+| 1 | 上传大小边界 + 文件头校验 | 未完成，未找到实现 PR | 已实现，测试通过，PR #16 待 review | 本文档 §1、§3 |
 | 2 | 跨平台启动文档 | 已开单，另行跟踪 | 另行跟踪 | Issue #3 |
 
 两条均不计入 Sprint 2 完成项，也不影响当前 `Project verification passed.` 的回归结论。

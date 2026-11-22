@@ -37,8 +37,13 @@
 - `mvn -f backend/pom.xml test` 全量后端回归：`Tests run: 188, Failures: 0, Errors: 0, Skipped: 0`，BUILD SUCCESS。
 - 9 条新增用例逐条执行目录快照比对：拒绝后临时目录文件数保持 0，合法用例为 1。
 
+## GitHub 交付状态
+
+- 分支 `feature/upload-size-header-validation` 已推送 origin；已创建 [Issue #15](https://github.com/universaaser/smart-education-ideology/issues/15) 与 [PR #16](https://github.com/universaaser/smart-education-ideology/pull/16)，PR 可干净合并。
+- 已按团队流程请求 `a3321919` 审查；待 review 通过后由 PR 作者自行合并，本次未自行合并。
+
 ## 下一位 agent 的接手提示
 
-- 若已获得 GitHub 授权，把分支 `feature/upload-size-header-validation` 推到 origin 并按团队流程创建 PR，附上本文件的验证结论，请另一名组员 review 后由作者合并。
-- 上线前补真实 HTTP 大文件与解析联调；如需区分 DOCX/PPTX/XLSX 内部部件，再另行扩展校验。
+- 跟进 PR #16 的审查意见，处理后由作者合并；上线前补真实 HTTP 大文件与解析联调。
+- 如需区分 DOCX/PPTX/XLSX 内部部件，再另行扩展校验。
 - 10/20、11/3 的点数需轮值人提供原始记录后补入，不能凭难度评级推断。
