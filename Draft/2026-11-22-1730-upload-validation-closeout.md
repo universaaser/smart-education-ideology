@@ -39,11 +39,12 @@
 
 ## GitHub 交付状态
 
-- 分支 `feature/upload-size-header-validation` 已推送 origin；已创建 [Issue #15](https://github.com/universaaser/smart-education-ideology/issues/15) 与 [PR #16](https://github.com/universaaser/smart-education-ideology/pull/16)，PR 可干净合并。
-- 已按团队流程请求 `a3321919` 审查；待 review 通过后由 PR 作者自行合并，本次未自行合并。
+- 分支 `feature/upload-size-header-validation` 已推送 origin；[Issue #15](https://github.com/universaaser/smart-education-ideology/issues/15) 已建单。原 [PR #16](https://github.com/universaaser/smart-education-ideology/pull/16) 曾合入 main 后按要求撤销；GitHub 不允许重开已合并 PR，故从同一分支新建 [PR #17](https://github.com/universaaser/smart-education-ideology/pull/17) 顶替，当前状态 clean、可干净合并。
+- 已请求 `a3321919` 审查；截至 2026-11-22 18:49 尚无 review 提交。
+- 审查意见中的 UTF-8 中文误拒、413 响应一致性及次要建议已修复，详见 `Draft/2026-11-22-1849-upload-validation-review-fixes.md`。
 
 ## 下一位 agent 的接手提示
 
-- 跟进 PR #16 的审查意见，处理后由作者合并；上线前补真实 HTTP 大文件与解析联调。
+- 跟进 PR #17 的审查意见，处理后由作者合并；上线前补真实 HTTP 大文件与解析联调。
 - 如需区分 DOCX/PPTX/XLSX 内部部件，再另行扩展校验。
 - 10/20、11/3 的点数需轮值人提供原始记录后补入，不能凭难度评级推断。

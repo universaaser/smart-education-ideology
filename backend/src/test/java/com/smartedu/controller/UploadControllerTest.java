@@ -361,6 +361,19 @@ class UploadControllerTest {
     }
 
     @Test
+    void shouldAcceptChineseMarkdown() throws Exception {
+        byte[] content = "# 思政课程笔记\n\n关键词：课程思政、物联网。\n".getBytes(StandardCharsets.UTF_8);
+
+        mockMvc.perform(multipart("/api/upload/file")
+                        .file(new MockMultipartFile("file", "中文笔记.markdown", "text/markdown", content))
+                        .param("userId", "9"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.code").value(200));
+
+        assertEquals(1L, countStoredFiles());
+    }
+
+    @Test
     void shouldRejectEmptyFileWithoutWriting() throws Exception {
         mockMvc.perform(multipart("/api/upload/file")
                         .file(new MockMultipartFile("file", "empty.pdf", "application/pdf", new byte[0]))

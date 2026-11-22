@@ -14,9 +14,10 @@ spring:
     password: root
   servlet:
     multipart:
-      # Container-level fallback; the controller rejects files above storage.max-size first.
-      max-file-size: 100MB
-      max-request-size: 120MB
+      # Stay above storage.max-size so the controller can return the business 413 envelope first.
+      # MaxUploadSizeExceededException is handled globally for requests beyond this container limit.
+      max-file-size: 105MB
+      max-request-size: 125MB
   jackson:
     date-format: yyyy-MM-dd HH:mm:ss
     time-zone: Asia/Shanghai

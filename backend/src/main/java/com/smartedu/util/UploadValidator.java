@@ -55,11 +55,12 @@ public final class UploadValidator {
     }
 
     public static boolean isAllowedType(String extension, String allowedTypes) {
-        if (extension == null || allowedTypes == null) {
+        if (extension == null || extension.isBlank() || allowedTypes == null) {
             return false;
         }
         return Arrays.stream(allowedTypes.split(","))
                 .map(String::trim)
+                .filter(value -> !value.isEmpty())
                 .anyMatch(extension::equalsIgnoreCase);
     }
 
@@ -130,8 +131,13 @@ public final class UploadValidator {
             }
             int controlBytes = 0;
             for (int i = 0; i < total; i++) {
-                byte value = sample[i];
-                if (value < 0x20 && value != 0x09 && value != 0x0A && value != 0x0D) {
+                // byte is signed in Java: UTF-8 multibyte characters must be read unsigned,
+                // otherwise every non-ASCII byte looks like a control character.
+                int unsigned = sample[i] & 0xFF;
+                if (unsigned == 0x00) {
+                    return false;
+                }
+                if (unsigned < 0x20 && unsigned != 0x09 && unsigned != 0x0A && unsigned != 0x0D) {
                     controlBytes++;
                 }
             }

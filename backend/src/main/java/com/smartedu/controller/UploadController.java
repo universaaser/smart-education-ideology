@@ -36,6 +36,7 @@ import java.nio.file.Paths;
 import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 
@@ -91,9 +92,10 @@ public class UploadController {
         String sizeError = UploadValidator.checkSize(file, maxFileSize.toBytes());
         if (sizeError != null) {
             if ("FILE_EMPTY".equals(sizeError)) {
-                return Result.error(400, "FILE_EMPTY: 请选择要上传的文件");
+                return Result.error(400, "FILE_EMPTY: No file was provided");
             }
-            return Result.error(413, "FILE_TOO_LARGE: 文件大小超过限制（最大 " + maxFileSize + "）");
+            return Result.error(413, "FILE_TOO_LARGE: File size exceeds the limit (max "
+                    + String.format(Locale.ROOT, "%dMB", maxFileSize.toMegabytes()) + ")");
         }
 
         String originalFilename = file.getOriginalFilename();
@@ -104,15 +106,15 @@ public class UploadController {
         // 扩展名白名单按完整项匹配，避免 "pd" 之类的子串被 "pdf" 放行
         String extension = getFileExtension(originalFilename).toLowerCase();
         if (!UploadValidator.isAllowedType(extension, allowedTypes)) {
-            return Result.badRequest("TYPE_NOT_ALLOWED: 不支持的文件类型，允许：" + allowedTypes);
+            return Result.badRequest("TYPE_NOT_ALLOWED: Unsupported file type; allowed: " + allowedTypes);
         }
 
         try {
             if (!UploadValidator.headerMatches(file, extension)) {
-                return Result.badRequest("FILE_HEADER_MISMATCH: 文件内容与实际类型不匹配");
+                return Result.badRequest("FILE_HEADER_MISMATCH: File content does not match its type");
             }
         } catch (IOException e) {
-            return Result.error(400, "FILE_HEADER_READ_ERROR: 文件读取失败");
+            return Result.error(400, "FILE_HEADER_READ_ERROR: Failed to read file");
         }
 
         try {
