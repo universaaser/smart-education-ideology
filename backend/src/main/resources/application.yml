@@ -14,8 +14,9 @@ spring:
     password: root
   servlet:
     multipart:
-      max-file-size: 50MB
-      max-request-size: 50MB
+      # Container-level fallback; the controller rejects files above storage.max-size first.
+      max-file-size: 100MB
+      max-request-size: 120MB
   jackson:
     date-format: yyyy-MM-dd HH:mm:ss
     time-zone: Asia/Shanghai
@@ -141,6 +142,7 @@ qdrant:
 storage:
   upload-path: ./uploads
   allowed-types: pdf,doc,docx,ppt,pptx,xls,xlsx,md,markdown
+  max-size: 100MB
 
 logging:
   level:
