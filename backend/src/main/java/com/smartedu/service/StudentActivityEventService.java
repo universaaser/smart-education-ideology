@@ -78,11 +78,8 @@ public class StudentActivityEventService {
                 .filter(event -> event.getDurationSeconds() != null)
                 .mapToInt(StudentActivityEvent::getDurationSeconds)
                 .sum() / 60;
-        int totalStudyMinutes = studentActivityEventMapper.selectList(baseQuery(studentId, courseId))
-                .stream()
-                .filter(event -> event.getDurationSeconds() != null)
-                .mapToInt(StudentActivityEvent::getDurationSeconds)
-                .sum() / 60;
+        Long totalDurationSeconds = studentActivityEventMapper.sumDurationSeconds(studentId, courseId);
+        int totalStudyMinutes = (totalDurationSeconds == null ? 0 : totalDurationSeconds.intValue()) / 60;
         long knowledgeViewCount = todayEvents.stream()
                 .filter(event -> "knowledge_view".equals(event.getEventType()))
                 .count();
